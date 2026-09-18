@@ -1,0 +1,166 @@
+{
+  "routines": [
+    {
+      "routine_id": "rtn_coding_mode",
+      "name": "Coding Mode",
+      "description": "Sets up an optimal development environment with IDE, docs, and audio level.",
+      "triggers": ["coding mode", "start coding", "start coding mode", "dev mode", "start dev mode"],
+      "enabled": true,
+      "actions": [
+        {
+          "action_name": "launch_application",
+          "params": {
+            "application_name": "Visual Studio Code"
+          },
+          "description": "Launch Visual Studio Code"
+        },
+        {
+          "action_name": "open_url",
+          "params": {
+            "url": "https://github.com"
+          },
+          "description": "Open GitHub dashboard"
+        },
+        {
+          "action_name": "set_volume",
+          "params": {
+            "level": 30
+          },
+          "description": "Set system volume to 30% for focused work"
+        },
+        {
+          "action_name": "remember_memory",
+          "params": {
+            "content": "Started a coding session in Visual Studio Code.",
+            "category": "WORKFLOW"
+          },
+          "description": "Log coding session start in memory"
+        }
+      ]
+    },
+    {
+      "routine_id": "rtn_meeting_mode",
+      "name": "Meeting Mode",
+      "description": "Prepares workstation for an online meeting or presentation.",
+      "triggers": ["meeting mode", "start meeting", "start meeting mode", "join meeting"],
+      "enabled": true,
+      "actions": [
+        {
+          "action_name": "open_url",
+          "params": {
+            "url": "https://meet.google.com"
+          },
+          "description": "Open Google Meet"
+        },
+        {
+          "action_name": "set_volume",
+          "params": {
+            "level": 45
+          },
+          "description": "Set balanced audio volume"
+        },
+        {
+          "action_name": "get_battery_status",
+          "params": {},
+          "description": "Check battery level for meeting readiness"
+        },
+        {
+          "action_name": "remember_memory",
+          "params": {
+            "content": "Entered meeting mode.",
+            "category": "WORKFLOW"
+          },
+          "description": "Log meeting mode activation"
+        }
+      ]
+    },
+    {
+      "routine_id": "rtn_morning_briefing",
+      "name": "Morning Briefing",
+      "description": "Provides system status, time, date, and reads active tasks to kick off the day.",
+      "triggers": ["morning briefing", "good morning", "daily briefing", "start morning briefing"],
+      "enabled": true,
+      "actions": [
+        {
+          "action_name": "get_time",
+          "params": {},
+          "description": "Check current time"
+        },
+        {
+          "action_name": "get_date",
+          "params": {},
+          "description": "Check today's date"
+        },
+        {
+          "action_name": "get_battery_status",
+          "params": {},
+          "description": "Check battery telemetry"
+        },
+        {
+          "action_name": "list_tasks",
+          "params": {},
+          "description": "Retrieve pending tasks"
+        }
+      ]
+    },
+    {
+      "routine_id": "rtn_focus_mode",
+      "name": "Focus Mode",
+      "description": "Minimizes distractions, sets volume, and records focus milestone.",
+      "triggers": ["focus mode", "start focus mode", "deep work", "start deep work"],
+      "enabled": true,
+      "actions": [
+        {
+          "action_name": "show_desktop",
+          "params": {},
+          "description": "Minimize desktop distractions"
+        },
+        {
+          "action_name": "set_volume",
+          "params": {
+            "level": 20
+          },
+          "description": "Lower volume for deep focus"
+        },
+        {
+          "action_name": "remember_memory",
+          "params": {
+            "content": "Started deep focus mode session.",
+            "category": "WORKFLOW"
+          },
+          "description": "Record focus mode activation in memory"
+        }
+      ]
+    },
+    {
+      "routine_id": "rtn_wrap_up_work",
+      "name": "Wrap Up Work",
+      "description": "Summarizes workday, captures notes, and queries system status.",
+      "triggers": ["wrap up work", "end workday", "finish work", "done for the day"],
+      "enabled": true,
+      "actions": [
+        {
+          "action_name": "create_note",
+          "params": {
+            "title": "Daily Wrap-up",
+            "content": "Wrapped up work session. System status checked and tasks logged."
+          },
+          "description": "Record daily wrap-up note"
+        },
+        {
+          "action_name": "get_system_status",
+          "params": {},
+          "description": "Audit system resources at end of day"
+        },
+        {
+          "action_name": "remember_memory",
+          "params": {
+            "content": "Wrapped up work for the day.",
+            "category": "WORKFLOW"
+          },
+          "description": "Store workday completion memory"
+        }
+      ]
+    }
+  ]
+}

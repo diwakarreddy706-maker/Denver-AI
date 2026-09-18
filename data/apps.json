@@ -1,0 +1,1005 @@
+[
+  {
+    "name": "YouTube",
+    "aliases": [
+      "youtube",
+      "yt",
+      "videos"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://www.youtube.com",
+    "category": "entertainment",
+    "launch_args": []
+  },
+  {
+    "name": "GitHub",
+    "aliases": [
+      "github",
+      "git",
+      "repos",
+      "repositories"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://github.com",
+    "category": "development",
+    "launch_args": []
+  },
+  {
+    "name": "ChatGPT",
+    "aliases": [
+      "chatgpt",
+      "openai",
+      "gpt"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://chat.openai.com",
+    "category": "web",
+    "launch_args": []
+  },
+  {
+    "name": "Google",
+    "aliases": [
+      "google",
+      "search engine",
+      "google search"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://www.google.com",
+    "category": "web",
+    "launch_args": []
+  },
+  {
+    "name": "Canva",
+    "aliases": [
+      "canva",
+      "graphic design",
+      "design tool"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://www.canva.com",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Gmail",
+    "aliases": [
+      "gmail",
+      "google mail",
+      "my email",
+      "emails"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://mail.google.com",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "LinkedIn",
+    "aliases": [
+      "linkedin",
+      "jobs",
+      "network"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://www.linkedin.com",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Google Maps",
+    "aliases": [
+      "maps",
+      "google maps",
+      "directions",
+      "navigation"
+    ],
+    "type": "url",
+    "path": "",
+    "url": "https://maps.google.com",
+    "category": "web",
+    "launch_args": []
+  },
+  {
+    "name": "Desktop Folder",
+    "aliases": [
+      "desktop",
+      "desktop folder",
+      "my desktop"
+    ],
+    "type": "folder",
+    "path": "C:\\Users\\diwak\\Desktop",
+    "url": "",
+    "category": "folders",
+    "launch_args": []
+  },
+  {
+    "name": "Downloads Folder",
+    "aliases": [
+      "downloads",
+      "download folder",
+      "my downloads"
+    ],
+    "type": "folder",
+    "path": "C:\\Users\\diwak\\Downloads",
+    "url": "",
+    "category": "folders",
+    "launch_args": []
+  },
+  {
+    "name": "Documents Folder",
+    "aliases": [
+      "documents",
+      "doc folder",
+      "my documents"
+    ],
+    "type": "folder",
+    "path": "C:\\Users\\diwak\\Documents",
+    "url": "",
+    "category": "folders",
+    "launch_args": []
+  },
+  {
+    "name": "AI Project Workspace",
+    "aliases": [
+      "ai project",
+      "ai folder",
+      "my project",
+      "workspace",
+      "codebase"
+    ],
+    "type": "folder",
+    "path": "C:\\Users\\diwak\\Desktop\\AI",
+    "url": "",
+    "category": "folders",
+    "launch_args": []
+  },
+  {
+    "name": "Calculator",
+    "aliases": [
+      "calculator",
+      "calc",
+      "math"
+    ],
+    "type": "executable",
+    "path": "calc.exe",
+    "url": "",
+    "category": "system",
+    "launch_args": []
+  },
+  {
+    "name": "Notepad",
+    "aliases": [
+      "notepad",
+      "text editor",
+      "notes"
+    ],
+    "type": "executable",
+    "path": "notepad.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Task Manager",
+    "aliases": [
+      "task manager",
+      "taskmgr",
+      "activity monitor"
+    ],
+    "type": "executable",
+    "path": "taskmgr.exe",
+    "url": "",
+    "category": "system",
+    "launch_args": []
+  },
+  {
+    "name": "Command Prompt",
+    "aliases": [
+      "cmd",
+      "command prompt",
+      "terminal",
+      "console"
+    ],
+    "type": "executable",
+    "path": "cmd.exe",
+    "url": "",
+    "category": "development",
+    "launch_args": []
+  },
+  {
+    "name": "PowerShell",
+    "aliases": [
+      "powershell",
+      "ps",
+      "terminal"
+    ],
+    "type": "executable",
+    "path": "powershell.exe",
+    "url": "",
+    "category": "development",
+    "launch_args": []
+  },
+  {
+    "name": "File Explorer",
+    "aliases": [
+      "file explorer",
+      "explorer",
+      "files",
+      "my computer"
+    ],
+    "type": "executable",
+    "path": "explorer.exe",
+    "url": "",
+    "category": "system",
+    "launch_args": []
+  },
+  {
+    "name": "Snipping Tool",
+    "aliases": [
+      "snipping tool",
+      "screenshot tool",
+      "snip"
+    ],
+    "type": "executable",
+    "path": "snippingtool.exe",
+    "url": "",
+    "category": "system",
+    "launch_args": []
+  },
+  {
+    "name": "Settings",
+    "aliases": [
+      "windows settings",
+      "settings",
+      "control panel"
+    ],
+    "type": "executable",
+    "path": "ms-settings:",
+    "url": "",
+    "category": "system",
+    "launch_args": []
+  },
+  {
+    "name": "Access",
+    "aliases": [
+      "access"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\MSACCESS.EXE",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Excel",
+    "aliases": [
+      "excel"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "OneDrive",
+    "aliases": [
+      "onedrive"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Outlook (classic)",
+    "aliases": [
+      "outlook (classic)",
+      "outlook classic",
+      "outlookclassic"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Publisher",
+    "aliases": [
+      "publisher"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\MSPUB.EXE",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Word",
+    "aliases": [
+      "word"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "7-Zip File Manager",
+    "aliases": [
+      "7zip file manager",
+      "7zipfilemanager",
+      "7-zip file manager"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\7-Zip\\7zFM.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Git Bash",
+    "aliases": [
+      "gitbash",
+      "git bash"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Git\\git-bash.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Git CMD",
+    "aliases": [
+      "git cmd",
+      "gitcmd"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Git\\git-cmd.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Git GUI",
+    "aliases": [
+      "gitgui",
+      "git gui"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Git\\cmd\\git-gui.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Git Release Notes",
+    "aliases": [
+      "gitreleasenotes",
+      "git release notes"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Git\\ReleaseNotes.html",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "MySQL Shell",
+    "aliases": [
+      "mysql shell",
+      "mysqlshell"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\MySQL\\MySQL Shell 8.0\\bin\\mysqlsh.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "MySQL Workbench 8.0 CE",
+    "aliases": [
+      "mysqlworkbench80ce",
+      "mysql workbench 8.0 ce",
+      "mysql workbench 80 ce"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\MySQL\\MySQL Workbench 8.0\\MySQLWorkbench.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "MySQL Installer - Community",
+    "aliases": [
+      "mysql installer - community",
+      "mysql installer  community",
+      "mysqlinstallercommunity"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files (x86)\\MySQL\\MySQL Installer for Windows\\MySQLInstaller.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "MySQL 8.0 Command Line Client - Unicode",
+    "aliases": [
+      "mysql 80 command line client  unicode",
+      "mysql80commandlineclientunicode",
+      "mysql 8.0 command line client - unicode"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "MySQL 8.0 Command Line Client",
+    "aliases": [
+      "mysql 80 command line client",
+      "mysql80commandlineclient",
+      "mysql 8.0 command line client"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "NVIDIA App",
+    "aliases": [
+      "nvidia app",
+      "nvidiaapp"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\CEF\\NVIDIA App.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "pgAdmin 4",
+    "aliases": [
+      "pgadmin 4",
+      "pgadmin4"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\PostgreSQL\\18\\pgAdmin 4\\runtime\\pgAdmin4.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Reload Configuration",
+    "aliases": [
+      "reloadconfiguration",
+      "reload configuration"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\PostgreSQL\\18\\bin\\pg_ctl.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "SQL Shell (psql)",
+    "aliases": [
+      "sql shell (psql)",
+      "sqlshellpsql",
+      "sql shell psql"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\PostgreSQL\\18\\scripts\\runpsql.bat",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Windows PowerShell ISE (x86)",
+    "aliases": [
+      "windowspowershellisex86",
+      "windows powershell ise x86",
+      "windows powershell ise (x86)"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\syswow64\\WindowsPowerShell\\v1.0\\PowerShell_ISE.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Windows PowerShell ISE",
+    "aliases": [
+      "windowspowershellise",
+      "windows powershell ise"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\PowerShell_ISE.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Administrative Tools",
+    "aliases": [
+      "administrative tools",
+      "administrativetools"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\control.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Antigravity",
+    "aliases": [
+      "antigravity"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Arduino IDE",
+    "aliases": [
+      "arduino ide",
+      "arduinoide"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Arduino IDE\\Arduino IDE.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Bionic",
+    "aliases": [
+      "bionic"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Bionic\\Bionic.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Cursor",
+    "aliases": [
+      "cursor"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Figma",
+    "aliases": [
+      "figma"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Figma\\app-126.6.14\\Figma.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Ollama",
+    "aliases": [
+      "ollama"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Ollama\\ollama app.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "OpenCode",
+    "aliases": [
+      "opencode"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Perplexity",
+    "aliases": [
+      "perplexity"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Perplexity\\Perplexity.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "uTorrent Web",
+    "aliases": [
+      "utorrentweb",
+      "utorrent web"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Roaming\\uTorrent Web\\utweb.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Visual Studio Code",
+    "aliases": [
+      "visual studio code",
+      "visualstudiocode"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "LiveCaptions",
+    "aliases": [
+      "livecaptions"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\LiveCaptions.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Magnify",
+    "aliases": [
+      "magnify"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\magnify.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Narrator",
+    "aliases": [
+      "narrator"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\narrator.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "On-Screen Keyboard",
+    "aliases": [
+      "onscreen keyboard",
+      "on-screen keyboard",
+      "onscreenkeyboard"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\osk.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "VoiceAccess",
+    "aliases": [
+      "voiceaccess"
+    ],
+    "type": "executable",
+    "path": "C:\\WINDOWS\\system32\\voiceaccess.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Antigravity IDE",
+    "aliases": [
+      "antigravityide",
+      "antigravity ide"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Antigravity IDE\\Antigravity IDE.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "AgriBOS ERP",
+    "aliases": [
+      "agriboserp",
+      "agribos erp"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome_proxy.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "NetMirror",
+    "aliases": [
+      "netmirror"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome_proxy.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Sri Basaveshwara Harvesting & Co. - Harvesting ERP",
+    "aliases": [
+      "sri basaveshwara harvesting & co. - harvesting erp",
+      "sribasaveshwaraharvestingcoharvestingerp",
+      "sri basaveshwara harvesting  co  harvesting erp"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome_proxy.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "GitHub Desktop",
+    "aliases": [
+      "githubdesktop",
+      "github desktop"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\GitHubDesktop\\GitHubDesktop.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Postman",
+    "aliases": [
+      "postman"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Postman\\Postman.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "IDLE (Python 3.14)",
+    "aliases": [
+      "idlepython314",
+      "idle python 314",
+      "idle (python 3.14)"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Python\\pythoncore-3.14-64\\pythonw.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "PyDoc (Python 3.14)",
+    "aliases": [
+      "pydocpython314",
+      "pydoc (python 3.14)",
+      "pydoc python 314"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.14 Manuals",
+    "aliases": [
+      "python314manuals",
+      "python 3.14 manuals",
+      "python 314 manuals"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Python\\pythoncore-3.14-64\\Doc\\html\\index.html",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.14",
+    "aliases": [
+      "python314",
+      "python 314",
+      "python 3.14"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "IDLE (Python 3.11 64-bit)",
+    "aliases": [
+      "idle (python 3.11 64-bit)",
+      "idle python 311 64bit",
+      "idlepython31164bit"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python311\\pythonw.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.11 (64-bit)",
+    "aliases": [
+      "python31164bit",
+      "python 311 64bit",
+      "python 3.11 (64-bit)"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.11 Module Docs (64-bit)",
+    "aliases": [
+      "python 311 module docs 64bit",
+      "python 3.11 module docs (64-bit)",
+      "python311moduledocs64bit"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "IDLE (Python 3.14 64-bit)",
+    "aliases": [
+      "idlepython31464bit",
+      "idle python 314 64bit",
+      "idle (python 3.14 64-bit)"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.14 (64-bit)",
+    "aliases": [
+      "python 3.14 (64-bit)",
+      "python 314 64bit",
+      "python31464bit"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.14 Manuals (64-bit)",
+    "aliases": [
+      "python314manuals64bit",
+      "python 314 manuals 64bit",
+      "python 3.14 manuals (64-bit)"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python314\\Doc\\html\\index.html",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Python 3.14 Module Docs (64-bit)",
+    "aliases": [
+      "python 3.14 module docs (64-bit)",
+      "python314moduledocs64bit",
+      "python 314 module docs 64bit"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Rockstar Games Launcher",
+    "aliases": [
+      "rockstargameslauncher",
+      "rockstar games launcher"
+    ],
+    "type": "executable",
+    "path": "D:\\Launcher\\LauncherPatcher.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Steam",
+    "aliases": [
+      "steam"
+    ],
+    "type": "executable",
+    "path": "C:\\Program Files (x86)\\Steam\\steam.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "TreeSize Free (Administrator)",
+    "aliases": [
+      "treesize free (administrator)",
+      "treesize free administrator",
+      "treesizefreeadministrator"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\JAM Software\\TreeSize Free\\TreeSizeFree.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "TreeSize Free",
+    "aliases": [
+      "treesize free",
+      "treesizefree"
+    ],
+    "type": "executable",
+    "path": "C:\\Users\\diwak\\AppData\\Local\\Programs\\JAM Software\\TreeSize Free\\TreeSizeFree.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Windows PowerShell (x86)",
+    "aliases": [
+      "windows powershell (x86)",
+      "windows powershell x86",
+      "windowspowershellx86"
+    ],
+    "type": "executable",
+    "path": "C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  },
+  {
+    "name": "Windows PowerShell",
+    "aliases": [
+      "windows powershell",
+      "windowspowershell"
+    ],
+    "type": "executable",
+    "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "url": "",
+    "category": "productivity",
+    "launch_args": []
+  }
+]

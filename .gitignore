@@ -1,0 +1,60 @@
+# Denver AI Assistant — Git Ignore Rules
+
+# Python bytecode and environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Distribution & Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.spec
+
+# Pytest & Coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Sensitive local configurations & secrets (NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+*.dat
+denver_vault.dat
+audit_vault.dat
+secrets.json
+
+# Local runtime data & dynamic stores
+data/contacts.json
+data/screenshots/
+data/meetings/
+data/cache/
+*.sqlite3
+denver_memory.sqlite3
+*.db
+*.log
+logs/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Reference archives (local inspection only)
+reference_file/
+_reference_repo/

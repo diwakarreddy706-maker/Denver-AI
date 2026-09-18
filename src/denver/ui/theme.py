@@ -1,0 +1,296 @@
+"""Denver Cyber-Command-Center Design System & Stylesheet for Denver Cockpit."""
+
+from __future__ import annotations
+
+# ============================================================================
+# Color Palette Constants (Cyber Command Center Aesthetic)
+# ============================================================================
+BG_ROOT = "#070B14"
+BG_SURFACE = "#0F172A"
+BG_PANEL = "#111827"
+BG_PANEL_ALT = "#1E293B"
+BG_GLASS = "rgba(17, 24, 39, 0.90)"
+BG_INPUT = "#0A0F1D"
+
+BORDER_SUBTLE = "#1E293B"
+BORDER_ACCENT = "#3B82F6"
+BORDER_CYAN = "#06B6D4"
+BORDER_PURPLE = "#8B6CF6"
+
+PRIMARY_BLUE = "#3B82F6"
+PRIMARY_CYAN = "#06B6D4"
+PRIMARY_PURPLE = "#8B6CF6"
+
+STATUS_SUCCESS = "#22C55E"
+STATUS_WARNING = "#F59E0B"
+STATUS_DANGER = "#EF4444"
+STATUS_MUTED = "#64748B"
+
+TEXT_PRIMARY = "#F8FAFC"
+TEXT_SECONDARY = "#94A3B8"
+TEXT_MUTED = "#64748B"
+TEXT_CYAN = "#38BDF8"
+
+# ============================================================================
+# Cyber-Command-Center QSS Stylesheet
+# ============================================================================
+COCKPIT_STYLESHEET = f"""
+/* Root Window Styling */
+QMainWindow, QWidget#CockpitRoot {{
+    background-color: {BG_ROOT};
+    color: {TEXT_PRIMARY};
+    font-family: 'Segoe UI', 'SF Pro Display', -apple-system, sans-serif;
+}}
+
+/* Top Navigation & Status Bar */
+QWidget#TopBar {{
+    background-color: {BG_SURFACE};
+    border-bottom: 1px solid {BORDER_SUBTLE};
+    border-radius: 8px;
+    padding: 6px 14px;
+}}
+
+QLabel#TitleLabel {{
+    color: {TEXT_PRIMARY};
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 2px;
+}}
+
+QLabel#SubtitleLabel {{
+    color: {TEXT_CYAN};
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}}
+
+/* Cyber Cards & Panels */
+QFrame.CyberPanel {{
+    background-color: {BG_PANEL};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: 8px;
+    padding: 10px;
+}}
+
+QFrame.CyberPanel:hover {{
+    border: 1px solid {BORDER_ACCENT};
+}}
+
+QLabel.PanelHeader {{
+    color: {TEXT_SECONDARY};
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}}
+
+/* Metric Cards & Labels */
+QLabel.MetricValue {{
+    color: {TEXT_PRIMARY};
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}}
+
+QLabel.MetricSubtext {{
+    color: {TEXT_MUTED};
+    font-size: 10px;
+    font-weight: 500;
+}}
+
+/* Status Indicator Pills */
+QLabel.StatusPillReady {{
+    background-color: rgba(34, 197, 94, 0.12);
+    color: {STATUS_SUCCESS};
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+
+QLabel.StatusPillWarning {{
+    background-color: rgba(245, 158, 11, 0.12);
+    color: {STATUS_WARNING};
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+
+QLabel.StatusPillDanger {{
+    background-color: rgba(239, 68, 68, 0.12);
+    color: {STATUS_DANGER};
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+
+QLabel.StatusPillMuted {{
+    background-color: rgba(100, 116, 139, 0.12);
+    color: {STATUS_MUTED};
+    border: 1px solid rgba(100, 116, 139, 0.4);
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+
+/* Command Input Bar */
+QLineEdit#CommandInput {{
+    background-color: {BG_INPUT};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    selection-background-color: {PRIMARY_BLUE};
+}}
+
+QLineEdit#CommandInput:focus {{
+    border: 1px solid {PRIMARY_CYAN};
+    background-color: #0c1424;
+}}
+
+QPushButton#SendButton {{
+    background-color: {PRIMARY_BLUE};
+    color: #FFFFFF;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+
+QPushButton#SendButton:hover {{
+    background-color: #2563eb;
+}}
+
+QPushButton#SendButton:pressed {{
+    background-color: #1d4ed8;
+}}
+
+/* Quick Action Chips */
+QPushButton.QuickChip {{
+    background-color: {BG_SURFACE};
+    color: {TEXT_SECONDARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+}}
+
+QPushButton.QuickChip:hover {{
+    background-color: {BG_PANEL_ALT};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {PRIMARY_CYAN};
+}}
+
+/* Activity Feed & Scroll Area */
+QScrollArea {{
+    background: transparent;
+    border: none;
+}}
+
+QScrollBar:vertical {{
+    background: {BG_ROOT};
+    width: 6px;
+    border-radius: 3px;
+}}
+
+QScrollBar::handle:vertical {{
+    background: {BORDER_SUBTLE};
+    min-height: 24px;
+    border-radius: 3px;
+}}
+
+QScrollBar::handle:vertical:hover {{
+    background: {PRIMARY_BLUE};
+}}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+/* Tabbed Command Hub */
+QTabWidget::pane {{
+    border: 1px solid {BORDER_SUBTLE};
+    background-color: {BG_SURFACE};
+    border-radius: 8px;
+    top: -1px;
+}}
+
+QTabBar::tab {{
+    background-color: {BG_INPUT};
+    color: {TEXT_SECONDARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    margin-right: 4px;
+}}
+
+QTabBar::tab:selected {{
+    background-color: {BG_SURFACE};
+    color: {TEXT_CYAN};
+    border-top: 2px solid {PRIMARY_CYAN};
+    border-left: 1px solid {BORDER_SUBTLE};
+    border-right: 1px solid {BORDER_SUBTLE};
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: {BG_PANEL_ALT};
+    color: {TEXT_PRIMARY};
+}}
+
+/* Dialog Windows */
+QDialog {{
+    background-color: {BG_SURFACE};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: 8px;
+}}
+
+QPushButton.DialogButtonPrimary {{
+    background-color: {PRIMARY_BLUE};
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+
+QPushButton.DialogButtonDanger {{
+    background-color: {STATUS_DANGER};
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+
+QPushButton.DialogButtonSecondary {{
+    background-color: {BG_PANEL_ALT};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 12px;
+}}
+"""
