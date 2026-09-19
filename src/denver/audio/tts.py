@@ -5,6 +5,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import io
+import re
 import time
 from typing import Any
 
@@ -18,6 +19,57 @@ try:
     _EDGE_TTS_AVAILABLE = True
 except ImportError:
     _EDGE_TTS_AVAILABLE = False
+
+
+def clean_text_for_speech(text: str) -> str:
+    """Sanitize raw markdown, pricing tier symbols, and formatting into clean conversational speech.
+
+    Prevents TTS from reading aloud literal symbols like '$$$', '$$$$', '###', markdown pipes,
+    backticks, or URLs.
+    """
+    if not text:
+        return ""
+
+    # 1. Remove code blocks entirely (code syntax is unlistenable via speech)
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+
+    # 2. Convert repeated dollar sign pricing tiers ($$, $$$, $$$$) into natural spoken words
+    text = re.sub(r"\${4,}", " expensive ", text)
+    text = re.sub(r"\${3}", " high-end ", text)
+    text = re.sub(r"\${2}", " moderate ", text)
+
+    # 3. Clean markdown headers (e.g. "### Overview" -> "Overview")
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+
+    # 4. Clean markdown bold / italic (*item*, **item**, _item_, __item__)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"_([^_]+)_", r"\1", text)
+
+    # 5. Clean markdown links: [Title](URL) -> Title
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # 6. Simplify raw URLs: "https://example.com/xyz" -> "example.com"
+    text = re.sub(r"https?://(?:www\.)?([a-zA-Z0-9.-]+)(?:/[^\s]*)?", r"\1", text)
+
+    # 7. Clean markdown table borders and delimiters (| col | col | and |---|---|)
+    text = re.sub(r"\|[-:\s|]+\|", "", text)
+    text = re.sub(r"\|", ", ", text)
+
+    # 8. Clean bullet points (- item, * item, • item)
+    text = re.sub(r"^\s*[-*•]\s+", "", text, flags=re.MULTILINE)
+
+    # 9. Clean decorative / standalone currency symbols without numbers
+    text = re.sub(r"\$(?!\d)", "", text)
+
+    # 10. Collapse multiple spaces, commas, and excessive blank lines
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r",\s*,+", ",", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+
+    return text.strip()
 
 
 class TextToSpeechProvider(abc.ABC):
@@ -81,9 +133,14 @@ class EdgeTTSProvider(TextToSpeechProvider):
         volume = request.volume or self.default_volume
         pitch = request.pitch or self.default_pitch
 
+        # Sanitize speech text to eliminate symbol repetition ($$$, ###, tables)
+        spoken_text = clean_text_for_speech(request.text)
+        if not spoken_text:
+            spoken_text = "Task completed."
+
         try:
             communicate = edge_tts.Communicate(
-                text=request.text,
+                text=spoken_text,
                 voice=voice,
                 rate=rate,
                 volume=volume,

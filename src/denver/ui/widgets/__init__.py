@@ -19,11 +19,20 @@ from denver.ui.widgets.home_dashboard import (
     SystemPerformanceCard,
     WeatherCard,
 )
+from denver.ui.widgets.ai_orb import DenverAIOrbWidget
+from denver.ui.widgets.hud_panels import (
+    DenverHUDPanelStack,
+    HUDAIStatusCard,
+    HUDClockCard,
+    HUDQuickStatusCard,
+    HUDSystemPerformanceCard,
+)
 from denver.ui.widgets.memory_status import MemoryStatusWidget
 from denver.ui.widgets.plugins_widget import PluginCardWidget, PluginsWidget
 from denver.ui.widgets.provider_status import ProviderRow, ProviderStatusWidget
 from denver.ui.widgets.routines_widget import ScheduledRoutinesWidget
 from denver.ui.widgets.settings_dialog import SettingsDialog
+from denver.ui.widgets.sidebar import DenverSidebarWidget
 from denver.ui.widgets.tasks_widget import TasksOrchestrationWidget
 from denver.ui.widgets.telemetry_panel import TelemetryCard, TelemetryPanelWidget
 from denver.ui.widgets.voice_status import VoiceStatusWidget
@@ -36,9 +45,16 @@ __all__ = [
     "AutomationStatusWidget",
     "BottomBarWidget",
     "CommandInputWidget",
+    "DenverAIOrbWidget",
     "DenverCoreVisualizer",
     "DenverDashboardOverlay",
+    "DenverHUDPanelStack",
     "DenverHomeTabWidget",
+    "DenverSidebarWidget",
+    "HUDAIStatusCard",
+    "HUDClockCard",
+    "HUDQuickStatusCard",
+    "HUDSystemPerformanceCard",
     "LiveClockCard",
     "MemoryStatusWidget",
     "PluginCardWidget",
@@ -58,3 +74,4 @@ __all__ = [
     "VoiceStatusWidget",
     "WeatherCard",
 ]
+

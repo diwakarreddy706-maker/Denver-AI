@@ -20,7 +20,7 @@ from denver.audio.models import (
 from denver.audio.playback import AudioPlayback
 from denver.audio.push_to_talk import PushToTalkListener
 from denver.audio.stt import GroqWhisperSTTProvider, SpeechToTextProvider, WhisperSTTProvider
-from denver.audio.tts import EdgeTTSProvider, TextToSpeechProvider
+from denver.audio.tts import EdgeTTSProvider, TextToSpeechProvider, clean_text_for_speech
 from denver.audio.tts_queue import DenverTTSQueue, TTSPriority
 from denver.audio.vad import EnergyVAD, VADEngine
 from denver.audio.wakeword import FallbackWakeWordDetector, WakeWordDetector
@@ -399,6 +399,10 @@ class VoicePipeline:
 
         # 4. Text-to-Speech (TTS) Synthesis
         if cmd_response.message and self.settings.tts_enabled:
+            clean_speech = clean_text_for_speech(cmd_response.message)
+            if not clean_speech:
+                clean_speech = "Task completed."
+
             # Transition: EXECUTING/PROCESSING -> SPEAKING
             if self.state_machine and self.state_machine.can_transition_to(DenverState.SPEAKING):
                 await self.state_machine.transition_to(
@@ -406,13 +410,13 @@ class VoicePipeline:
                     reason="Speaking response",
                 )
 
-            await self.event_bus.publish(TTSStarted(text=cmd_response.message, provider=self.tts.name))
-            tts_res = await self.tts.synthesize(TTSRequest(text=cmd_response.message))
+            await self.event_bus.publish(TTSStarted(text=clean_speech, provider=self.tts.name))
+            tts_res = await self.tts.synthesize(TTSRequest(text=clean_speech))
 
             if tts_res.success and tts_res.audio_data:
                 await self.event_bus.publish(
                     TTSCompleted(
-                        text=cmd_response.message,
+                        text=clean_speech,
                         duration_seconds=tts_res.duration_seconds,
                         latency_ms=tts_res.latency_ms,
                         provider=self.tts.name,
