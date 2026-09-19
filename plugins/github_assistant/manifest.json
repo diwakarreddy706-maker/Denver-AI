@@ -1,0 +1,11 @@
+{
+  "id": "github_assistant",
+  "name": "GitHub Assistant",
+  "version": "1.0.0",
+  "author": "Denver Community",
+  "description": "Voice and text commands to check pull requests, open issues, and CI status.",
+  "entrypoint": "main:GitHubPlugin",
+  "permissions": ["commands.register", "ui.notify", "network.request"],
+  "min_denver_version": "0.1.0",
+  "enabled": true
+}

@@ -1,0 +1,11 @@
+{
+  "id": "system_sentinel",
+  "name": "System Sentinel & Security Monitor",
+  "version": "1.0.0",
+  "author": "Denver Community",
+  "description": "Monitors system health, logs background alerts, and manages security audit trails.",
+  "entrypoint": "main:SystemSentinelPlugin",
+  "permissions": ["commands.register", "ui.notify", "filesystem.read", "filesystem.write"],
+  "min_denver_version": "0.1.0",
+  "enabled": true
+}

@@ -1,0 +1,11 @@
+{
+  "id": "spotify_media",
+  "name": "Spotify & Media Controller",
+  "version": "1.0.0",
+  "author": "Denver Community",
+  "description": "Integration for Spotify playback, playlists, track controls, and volume.",
+  "entrypoint": "main:SpotifyPlugin",
+  "permissions": ["commands.register", "ui.notify", "audio.play"],
+  "min_denver_version": "0.1.0",
+  "enabled": true
+}

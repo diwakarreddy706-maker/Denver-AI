@@ -1,0 +1,11 @@
+{
+  "id": "home_automation",
+  "name": "Smart Home & IoT Control",
+  "version": "1.0.0",
+  "author": "Denver Community",
+  "description": "Control smart lights, switches, and home appliances via voice commands.",
+  "entrypoint": "main:HomeAutomationPlugin",
+  "permissions": ["commands.register", "ui.notify", "desktop.automation"],
+  "min_denver_version": "0.1.0",
+  "enabled": true
+}
