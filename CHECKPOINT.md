@@ -1,9 +1,9 @@
 # 🛰️ Denver AI Assistant — Project Checkpoint & State Manifest
 
-> **Last Updated:** September 17, 2026 (21:05 IST)  
+> **Last Updated:** September 19, 2026 (07:54 IST)  
 > **Environment:** Windows 11 Pro, Python 3.14.7  
 > **Repository:** `C:\Users\diwak\Desktop\AI`  
-> **Test Suite Status:** ✅ **403 / 403 PASSING (100%)**
+> **Test Suite Status:** ✅ **459 / 459 PASSING (100%)**
 
 ---
 
@@ -310,23 +310,51 @@
   - [`CONTRIBUTING.md`](file:///c:/Users/diwak/Desktop/AI/CONTRIBUTING.md): Code standards, determinism rules, and test verification workflow.
   - [`CODE_OF_CONDUCT.md`](file:///c:/Users/diwak/Desktop/AI/CODE_OF_CONDUCT.md): Contributor Covenant pledge and enforcement guidelines.
 
+### 0.16 💬 Advanced WhatsApp Voice Dispatch & ContactBook Integration (`src/denver/automation/whatsapp.py`)
+- **Deterministic Contact Matching**:
+  - Direct integration with `ContactBook` (413 curated contacts in `data/contacts.json`).
+  - Fuzzy and relationship matching ("Mom", "Dad", "Alex", "Home") with phone normalization (E.164 standard).
+  - Ambiguity resolution handling: prompts for clarification if multiple candidate contacts share similar names.
+- **Protocol & Browser Automation**:
+  - Native URI protocol dispatch (`whatsapp://send?phone=...&text=...`) with seamless fallback to WhatsApp Web (`https://web.whatsapp.com/send?phone=...&text=...`).
+  - E.164 phone number sanitation and URL encoding.
+- **Voice Intents**:
+  - *"Denver, send WhatsApp to Alex saying I will join the meeting in 5 minutes"*
+  - *"Denver, message Mom on WhatsApp saying I arrived safely"*
+
+### 0.17 🎵 Spotify Voice Controller Subsystem (`src/denver/automation/spotify.py`)
+- **Native Windows Media Key Triggers**:
+  - Zero-latency media control via `user32.dll` virtual key codes (`VK_MEDIA_PLAY_PAUSE`, `VK_MEDIA_NEXT_TRACK`, `VK_MEDIA_PREV_TRACK`, `VK_MEDIA_STOP`).
+  - Spotify desktop URI protocol search (`spotify:search:<query>`) and web player fallback (`https://open.spotify.com/search/<query>`).
+- **Telemetry & Event Bus**:
+  - Dispatches strongly typed `SpotifyPlaybackChanged` event with action type, query metadata, and timestamp.
+- **Voice Intents**:
+  - *"Denver, play music"* / *"Denver, play Spotify"* / *"Denver, pause music"* / *"Denver, resume"*
+  - *"Denver, next song"* / *"Denver, skip track"* / *"Denver, previous track"*
+  - *"Denver, play Starboy on Spotify"* / *"Denver, search Spotify for Interstellar"*
+
+### 0.18 🛡️ Local-First Air-Gapped Mode & Dynamic AI Provider Toggles (`src/denver/providers/router.py`)
+- **Strict Air-Gapped Privacy Enclosure**:
+  - Dynamic runtime toggle `set_air_gap_mode(enabled: bool)`.
+  - When enabled, strictly filters out and blocks all cloud AI providers (`groq`, `gemini`), enforcing 100% local processing (`ollama`, `lmstudio`) with zero network egress.
+  - Prevents credential and memory leakage with built-in cloud context sanitizers.
+- **Dynamic Active Provider Switching**:
+  - `set_active_provider(provider_name: str)`: Dynamically reprioritizes the AI router fallback queue.
+  - Telemetry event emission via `AirGappedModeChanged` and `ProviderModeChanged`.
+- **Voice Intents**:
+  - *"Denver, switch to local only mode"* / *"Denver, air-gapped mode"* / *"Denver, go offline"* / *"Denver, disconnect cloud"*
+  - *"Denver, switch to cloud mode"* / *"Denver, go online"* / *"Denver, disable air-gapped mode"*
+  - *"Denver, switch provider to Groq"* / *"Denver, switch to Gemini"* / *"Denver, use Ollama"* / *"Denver, set provider to LM Studio"*
+
 ---
 
-## 🔮 Roadmap & Exact Starting Point for Tomorrow
+## 🔮 Roadmap & Next Objectives
 
-When resuming our next development session, we will start directly with:
-
-### 1. 💬 Priority 1: Advanced WhatsApp Automation & Voice Dispatch
-- [ ] Connect [`ContactBook`](file:///c:/Users/diwak/Desktop/AI/src/denver/memory/contacts.py) (413 user contacts in [`data/contacts.json`](file:///c:/Users/diwak/Desktop/AI/data/contacts.json)) with automated message dispatching via WhatsApp Desktop / Web protocol.
-- [ ] Voice intents: *"Denver, send WhatsApp to Alex saying I will join the meeting in 5 minutes"*, *"Denver, message Mom on WhatsApp saying I arrived safely"*.
-- [ ] Add unit tests in `tests/unit/test_whatsapp_automation.py`.
-
-### 2. 🎵 Priority 2: Spotify Voice Controller Subsystem
-- [ ] Implement Spotify Web API OAuth integration + Windows Media Key fallback (`VK_MEDIA_PLAY_PAUSE`, `VK_MEDIA_NEXT_TRACK`, `VK_MEDIA_PREV_TRACK`).
-- [ ] Voice intents: *"Denver, play Spotify"*, *"Denver, pause music"*, *"Denver, next song"*, *"Denver, what song is playing?"*.
-
-### 3. 🛡️ Priority 3: Local-First Air-Gapped Mode & Voice Provider Toggles
-- [ ] Voice/CLI commands: *"Denver, switch to local only mode"*, *"Denver, enable cloud fallback"*, *"Denver, switch to Groq"*, *"Denver, switch to Gemini"*.
+- [x] **Priority 1**: Advanced WhatsApp Automation & Voice Dispatch (Complete — 413 contacts integrated & tested).
+- [x] **Priority 2**: Spotify Voice Controller Subsystem (Complete — Native media keys + Spotify search + 17 unit tests).
+- [x] **Priority 3**: Local-First Air-Gapped Mode & AI Provider Toggles (Complete — Strict cloud enclosure + 9 unit tests).
+- [ ] **Next Objective 1**: Continuous Ambient Audio & Multi-turn Conversation Mode.
+- [ ] **Next Objective 2**: Deep Desktop Workflow Orchestration (Multi-App chaining with confirmation gates).
 
 ---
 
@@ -334,11 +362,13 @@ When resuming our next development session, we will start directly with:
 
 | Mode | Command | Description |
 |---|---|---|
-| **Voice Assistant (Headless)** | `python main.py --headless` | Full hands-free voice loop (Wake word + Chime + STT + LLM + TTS + Routines + WhatsApp). |
+| **Voice Assistant (Headless)** | `python main.py --headless` | Full hands-free voice loop (Wake word + Chime + STT + LLM + TTS + Routines + WhatsApp + Spotify). |
 | **Cyber Cockpit GUI** | `python -m denver --gui` | PySide6 dark cockpit with animated HUD visualizer, DAG workflows, and live telemetry. |
 | **Repo Hygiene Audit** | `python repo_hygiene.py --clean` | Pre-commit/pre-release cache cleanup & secret scan. |
 | **Build Portable Package** | `python release_build.py --dry-run` | Stage & audit Windows portable distribution package. |
 | **Lock Laptop** | `python main.py -c "lock the laptop"` | Instantly lock Windows session via CLI or voice. |
+| **Spotify Control** | `python main.py -c "play Starboy on spotify"` | Search & play tracks on Spotify via CLI or voice. |
+| **Air-Gapped Mode** | `python main.py -c "switch to local only mode"` | Lock AI inference strictly to offline local models. |
 | **Sleep Mode** | `python main.py -c "go to sleep"` | Put Denver into background silent observation mode. |
 | **Wake Up** | `python main.py -c "wake up"` | Restore active voice assistance from sleep mode. |
 | **Run Compound Routine** | `python main.py -c "start coding mode"` | Execute multi-step compound routine via CLI. |
@@ -355,6 +385,9 @@ When resuming our next development session, we will start directly with:
 - `data/routines.json` (Curated compound routines dataset)
 - `data/contacts.json` (413 user contacts)
 - `data/apps.json` (81 discovered applications and shortcuts)
+- `src/denver/automation/spotify.py` (Spotify Voice Controller & Windows virtual media keys)
+- `src/denver/automation/whatsapp.py` (WhatsApp voice messaging & ContactBook integration)
+- `src/denver/providers/router.py` (AI Provider Router with Air-Gapped enclosure & dynamic toggles)
 - `src/denver/scheduler/compound_routines.py` (Compound routine loader & matcher)
 - `src/denver/scheduler/routine_registry.py` (Routine lifecycle & seeding)
 - `src/denver/context/engine.py` (Context engine & prompt builder)
@@ -366,5 +399,6 @@ When resuming our next development session, we will start directly with:
 - `src/denver/release/verifier.py` (Release security artifact verifier)
 - `src/denver/ui/widgets/plugins_widget.py` (Cockpit modular plugin manager)
 - `src/denver/health/repair.py` (Self-healing auto-repair engine)
-- `tests/unit/` & `tests/integration/` (403 automated unit & integration tests)
+- `tests/unit/` & `tests/integration/` (459 automated unit & integration tests)
+
 

@@ -34,6 +34,7 @@ from denver.runtime.events import (
     AutomationRequested,
     AutomationStarted,
     ScreenshotCaptured,
+    SpotifyPlaybackChanged,
     VolumeChanged,
     WindowActionPerformed,
 )
@@ -54,11 +55,13 @@ class AutomationExecutor:
         screenshot: ScreenshotController | None = None,
         system: SystemController | None = None,
         confirmation: ConfirmationManager | None = None,
+        spotify: Any | None = None,
         event_bus: DenverEventBus | None = None,
         allow_high_risk_actions: bool = False,
     ) -> None:
         from denver.automation.clipboard import ClipboardController
         from denver.automation.keyboard import KeyboardController
+        from denver.automation.spotify import SpotifyController
 
         self.registry = registry or AutomationRegistry()
         self.applications = applications or ApplicationController(self.registry)
@@ -69,6 +72,7 @@ class AutomationExecutor:
         self.system = system or SystemController()
         self.clipboard = ClipboardController()
         self.keyboard = KeyboardController()
+        self.spotify = spotify or SpotifyController()
         self.confirmation = confirmation or ConfirmationManager()
         self.event_bus = event_bus or get_event_bus()
         self.allow_high_risk_actions = allow_high_risk_actions
@@ -300,6 +304,27 @@ class AutomationExecutor:
                 direction = request.params.get("direction", "down")
                 steps = int(request.params.get("steps", 5) or 5)
                 res = self.keyboard.scroll(direction=direction, amount=steps)
+
+            elif action_name == "spotify_play_pause":
+                res = self.spotify.play_pause()
+                if res.success:
+                    await self.event_bus.publish(SpotifyPlaybackChanged(action="play_pause", query=""))
+
+            elif action_name == "spotify_next_track":
+                res = self.spotify.next_track()
+                if res.success:
+                    await self.event_bus.publish(SpotifyPlaybackChanged(action="next_track", query=""))
+
+            elif action_name == "spotify_previous_track":
+                res = self.spotify.previous_track()
+                if res.success:
+                    await self.event_bus.publish(SpotifyPlaybackChanged(action="previous_track", query=""))
+
+            elif action_name == "spotify_play_query":
+                q = request.params.get("query", "") or request.target
+                res = self.spotify.play_query(q)
+                if res.success:
+                    await self.event_bus.publish(SpotifyPlaybackChanged(action="play_query", query=q))
 
             else:
                 res = AutomationResult(

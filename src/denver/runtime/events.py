@@ -303,6 +303,23 @@ class ProviderUnavailable(DenverEvent):
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class AirGappedModeChanged(DenverEvent):
+    """Emitted when Air-Gapped / Local-Only mode is toggled."""
+
+    enabled: bool = False
+    enforced_providers: tuple[str, ...] = ("ollama", "lmstudio")
+
+
+@dataclass(frozen=True)
+class ProviderModeChanged(DenverEvent):
+    """Emitted when active LLM provider or priority is switched."""
+
+    active_provider: str = "groq"
+    air_gapped: bool = False
+    priority_order: tuple[str, ...] = ()
+
+
 # ============================================================================
 # Future Pipeline Event Interfaces (Audio & Automation)
 # ============================================================================
@@ -941,5 +958,15 @@ class WhatsAppMessageDispatched(DenverEvent):
     phone: str = ""
     message: str = ""
     success: bool = True
+
+
+@dataclass(frozen=True)
+class SpotifyPlaybackChanged(DenverEvent):
+    """Emitted when Spotify / media playback action is triggered."""
+
+    action: str = "play_pause"
+    query: str = ""
+    success: bool = True
+
 
 

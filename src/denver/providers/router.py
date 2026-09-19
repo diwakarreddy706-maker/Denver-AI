@@ -17,9 +17,12 @@ from denver.providers.models import (
 )
 from denver.providers.registry import ProviderRegistry
 from denver.runtime.event_bus import DenverEventBus, get_event_bus
+from denver.providers.privacy import sanitize_messages_for_cloud
 from denver.runtime.events import (
+    AirGappedModeChanged,
     ProviderFailed,
     ProviderFallback,
+    ProviderModeChanged,
     ProviderRequestStarted,
     ProviderResponseReceived,
     ProviderUnavailable,
@@ -80,24 +83,55 @@ class ProviderRouter:
         priority_order: tuple[str, ...] = ("ollama", "lmstudio", "groq", "gemini"),
         local_first: bool = True,
         cloud_fallback_enabled: bool = False,
+        air_gapped_mode: bool = False,
+        active_provider: str | None = None,
     ) -> None:
         self.registry = registry
         self.event_bus = event_bus or get_event_bus()
-        self.priority_order = priority_order
+        self.priority_order = tuple(priority_order)
         self.local_first = local_first
         self.cloud_fallback_enabled = cloud_fallback_enabled
+        self.air_gapped_mode = air_gapped_mode
+        self.active_provider = active_provider
+        if active_provider:
+            self.set_active_provider(active_provider)
+
+    def set_air_gapped_mode(self, enabled: bool) -> None:
+        """Toggle air-gapped / local-only mode. When True, all cloud providers are strictly blocked."""
+        self.air_gapped_mode = enabled
+        logger.info("Air-Gapped Mode set to: %s", enabled)
+
+    def set_active_provider(self, provider_name: str) -> bool:
+        """Set primary preferred LLM provider. Reorders priority queue so this provider is tried first."""
+        clean_name = provider_name.strip().lower()
+        provider = self.registry.get(clean_name)
+        if not provider:
+            logger.warning("Provider '%s' not registered in ProviderRegistry.", clean_name)
+            return False
+
+        self.active_provider = clean_name
+        current_list = list(self.priority_order)
+        if clean_name in current_list:
+            current_list.remove(clean_name)
+        self.priority_order = tuple([clean_name] + current_list)
+        logger.info("Active LLM provider set to '%s'. Priority order: %s", clean_name, self.priority_order)
+        return True
 
     def get_ordered_providers(self, complexity: TaskComplexity = TaskComplexity.LOW) -> list[AIProvider]:
-        """Resolve ordered list of providers based on priority configuration and complexity."""
+        """Resolve ordered list of providers based on priority configuration, air-gapped constraints, and complexity."""
         ordered = []
         for name in self.priority_order:
             provider = self.registry.get(name)
             if provider and provider.enabled:
+                if self.air_gapped_mode and provider.provider_type == ProviderType.CLOUD:
+                    continue
                 ordered.append(provider)
 
         # Append any other registered providers not listed in priority
         for provider in self.registry.list_providers():
             if provider.enabled and provider not in ordered:
+                if self.air_gapped_mode and provider.provider_type == ProviderType.CLOUD:
+                    continue
                 ordered.append(provider)
 
         return ordered
@@ -118,10 +152,15 @@ class ProviderRouter:
 
         providers = self.get_ordered_providers(complexity=complexity)
         if not providers:
+            err_msg = (
+                "No AI provider is currently available (Air-Gapped mode active; cloud providers blocked)."
+                if self.air_gapped_mode
+                else "No AI provider is currently available."
+            )
             return ProviderResponse(
                 text="",
                 success=False,
-                error="No AI provider is currently available.",
+                error=err_msg,
             )
 
         last_error: Exception | None = None
@@ -129,9 +168,13 @@ class ProviderRouter:
 
         for i, provider in enumerate(providers):
             # If cloud provider and cloud fallback is disabled
-            if provider.provider_type == ProviderType.CLOUD and not self.cloud_fallback_enabled:
-                logger.debug("Skipping cloud provider '%s': cloud fallback is disabled.", provider.name)
-                continue
+            if provider.provider_type == ProviderType.CLOUD:
+                if self.air_gapped_mode:
+                    logger.debug("Skipping cloud provider '%s': air-gapped mode is active.", provider.name)
+                    continue
+                if not self.cloud_fallback_enabled and self.active_provider != provider.name:
+                    logger.debug("Skipping cloud provider '%s': cloud fallback is disabled.", provider.name)
+                    continue
 
             attempted_providers.append(provider.name)
             is_cloud = (provider.provider_type == ProviderType.CLOUD)

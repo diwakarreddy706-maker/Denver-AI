@@ -42,12 +42,15 @@ from denver.providers.router import ProviderRouter
 
 from denver.runtime.event_bus import DenverEventBus, get_event_bus
 from denver.runtime.events import (
+    AirGappedModeChanged,
     CommandExecutionCompleted,
     CommandExecutionStarted,
     CommandFailed,
     CommandNormalized,
     CommandReceived,
     CommandRouted,
+    ProviderModeChanged,
+    SpotifyPlaybackChanged,
 )
 from denver.runtime.state_machine import DenverStateMachine
 from denver.runtime.states import DenverState
@@ -145,6 +148,9 @@ class CommandEngineService:
             self.plugin_registry.discover_and_load_all()
         except Exception as exc:
             logger.debug("Plugin initial scan note: %s", exc)
+        from denver.automation.spotify import SpotifyController
+        self.spotify_controller = SpotifyController()
+
 
         self._register_default_actions()
 
@@ -427,6 +433,42 @@ class CommandEngineService:
                 category=CommandCategory.APPLICATION,
                 risk_level=CommandRiskLevel.LOW,
                 handler=self._handle_send_whatsapp_message,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="spotify_play_pause",
+                description="Toggles Spotify or system media playback (Play / Pause).",
+                category=CommandCategory.APPLICATION,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_spotify_play_pause,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="spotify_next_track",
+                description="Skips to the next song or track on Spotify.",
+                category=CommandCategory.APPLICATION,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_spotify_next_track,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="spotify_previous_track",
+                description="Returns to the previous song or track on Spotify.",
+                category=CommandCategory.APPLICATION,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_spotify_previous_track,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="spotify_play_query",
+                description="Searches and plays a specific song, artist, album, or playlist on Spotify.",
+                category=CommandCategory.APPLICATION,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_spotify_play_query,
             )
         )
 
@@ -1106,6 +1148,26 @@ class CommandEngineService:
             )
         )
 
+        # 21. Air-Gapped Mode & LLM Provider Actions
+        self.registry.register(
+            ActionDefinition(
+                name="set_air_gap_mode",
+                description="Toggles air-gapped / local-only mode to prevent cloud leakage.",
+                category=CommandCategory.SYSTEM,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_set_air_gap_mode,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="switch_llm_provider",
+                description="Switches active LLM inference provider (groq, gemini, ollama, lmstudio).",
+                category=CommandCategory.SYSTEM,
+                risk_level=CommandRiskLevel.LOW,
+                handler=self._handle_switch_llm_provider,
+            )
+        )
+
 
 
     # -------------------------------------------------------------------------
@@ -1518,6 +1580,37 @@ class CommandEngineService:
             error=res.error,
         )
 
+    async def _handle_set_air_gap_mode(self, params: dict[str, Any]) -> ActionResult:
+        enabled = bool(params.get("enabled", True))
+        if self.provider_router:
+            self.provider_router.set_air_gapped_mode(enabled)
+        await self.event_bus.publish(AirGappedModeChanged(enabled=enabled))
+        status_desc = "ENABLED (Offline Local-Only Mode)" if enabled else "DISABLED (Cloud Fallback Available)"
+        return ActionResult(
+            success=True,
+            message=f"Air-Gapped privacy mode is now {status_desc}.",
+            action_name="set_air_gap_mode",
+            data={"air_gapped": enabled},
+        )
+
+    async def _handle_switch_llm_provider(self, params: dict[str, Any]) -> ActionResult:
+        prov = params.get("provider", "groq").strip().lower()
+        if self.provider_router:
+            self.provider_router.set_active_provider(prov)
+        is_air_gapped = bool(self.provider_router.air_gapped_mode if self.provider_router else False)
+        await self.event_bus.publish(
+            ProviderModeChanged(
+                active_provider=prov,
+                air_gapped=is_air_gapped,
+            )
+        )
+        return ActionResult(
+            success=True,
+            message=f"Switched active AI provider to '{prov}'.",
+            action_name="switch_llm_provider",
+            data={"active_provider": prov, "air_gapped": is_air_gapped},
+        )
+
     async def _handle_send_whatsapp_message(self, params: dict[str, Any]) -> ActionResult:
         msg = params.get("message", "")
         contact = (params.get("contact", "") or params.get("recipient", "")).strip()
@@ -1613,6 +1706,72 @@ class CommandEngineService:
             data=res.data,
             error=res.error,
         )
+
+    async def _handle_spotify_play_pause(self, params: dict[str, Any]) -> ActionResult:
+        res = self.spotify_controller.play_pause()
+        if hasattr(self, "event_bus") and self.event_bus:
+            try:
+                from denver.runtime.events import SpotifyPlaybackChanged
+                await self.event_bus.publish(SpotifyPlaybackChanged(action="play_pause", success=res.success))
+            except Exception:
+                pass
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="spotify_play_pause",
+            data=res.data,
+            error=res.error,
+        )
+
+    async def _handle_spotify_next_track(self, params: dict[str, Any]) -> ActionResult:
+        res = self.spotify_controller.next_track()
+        if hasattr(self, "event_bus") and self.event_bus:
+            try:
+                from denver.runtime.events import SpotifyPlaybackChanged
+                await self.event_bus.publish(SpotifyPlaybackChanged(action="next_track", success=res.success))
+            except Exception:
+                pass
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="spotify_next_track",
+            data=res.data,
+            error=res.error,
+        )
+
+    async def _handle_spotify_previous_track(self, params: dict[str, Any]) -> ActionResult:
+        res = self.spotify_controller.previous_track()
+        if hasattr(self, "event_bus") and self.event_bus:
+            try:
+                from denver.runtime.events import SpotifyPlaybackChanged
+                await self.event_bus.publish(SpotifyPlaybackChanged(action="previous_track", success=res.success))
+            except Exception:
+                pass
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="spotify_previous_track",
+            data=res.data,
+            error=res.error,
+        )
+
+    async def _handle_spotify_play_query(self, params: dict[str, Any]) -> ActionResult:
+        query = params.get("query", "").strip()
+        res = self.spotify_controller.play_query(query)
+        if hasattr(self, "event_bus") and self.event_bus:
+            try:
+                from denver.runtime.events import SpotifyPlaybackChanged
+                await self.event_bus.publish(SpotifyPlaybackChanged(action="play_query", query=query, success=res.success))
+            except Exception:
+                pass
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="spotify_play_query",
+            data=res.data,
+            error=res.error,
+        )
+
 
     async def _handle_minimize_window(self, params: dict[str, Any]) -> ActionResult:
         win_name = params.get("window", "")

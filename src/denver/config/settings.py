@@ -110,8 +110,9 @@ class DenverSettings:
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://localhost:8888/callback"
-
     cloud_fallback_enabled: bool = False
+    air_gapped_mode: bool = False
+    active_llm_provider: str = "groq"
 
     # Weather (Open-Meteo & WebAgent Fallback)
     weather_provider: str = "open-meteo"
@@ -262,6 +263,8 @@ class DenverSettings:
             spotify_client_secret=source.get("SPOTIFY_CLIENT_SECRET", source.get("DENVER_SPOTIFY_CLIENT_SECRET", "")),
             spotify_redirect_uri=source.get("SPOTIFY_REDIRECT_URI", source.get("DENVER_SPOTIFY_REDIRECT_URI", "http://localhost:8888/callback")),
             cloud_fallback_enabled=_parse_bool(source.get("DENVER_CLOUD_FALLBACK_ENABLED"), False),
+            air_gapped_mode=_parse_bool(source.get("DENVER_AIR_GAPPED_MODE"), False),
+            active_llm_provider=source.get("DENVER_ACTIVE_LLM_PROVIDER", "groq").strip().lower(),
             voice_enabled=_parse_bool(source.get("DENVER_VOICE_ENABLED", source.get("DENVER_AUDIO_ENABLED")), True),
             audio_enabled=_parse_bool(source.get("DENVER_AUDIO_ENABLED", source.get("DENVER_VOICE_ENABLED")), True),
             audio_input_device=source.get("DENVER_AUDIO_INPUT_DEVICE"),

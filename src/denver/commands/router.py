@@ -319,6 +319,38 @@ class IntentRouter:
             r"^(?:reload\s+plugins|refresh\s+plugins|rescan\s+plugins)$",
             re.IGNORECASE,
         )
+        # 28. Spotify & Media Playback Control
+        self._spotify_play_pause_re = re.compile(
+            r"^(?:(?:play|pause|resume|stop)\s+(?:spotify|music|songs?|the\s+music|the\s+song)|play\s+music|pause\s+music|resume\s+music|play\s+spotify|pause\s+spotify|resume\s+spotify|pause|resume)$",
+            re.IGNORECASE,
+        )
+        self._spotify_next_re = re.compile(
+            r"^(?:next\s+(?:song|track|music)|skip\s+(?:song|track|music|this\s+song|this\s+track)?|next\s+track|next\s+song|next)$",
+            re.IGNORECASE,
+        )
+        self._spotify_prev_re = re.compile(
+            r"^(?:previous\s+(?:song|track|music)|prev\s+(?:song|track|music)|back\s+track|go\s+back\s+a\s+song|previous\s+song|previous\s+track|previous)$",
+            re.IGNORECASE,
+        )
+        self._spotify_search_re = re.compile(
+            r"^(?:play\s+(?:the\s+)?(?:song|track|artist|album|playlist)?\s*(.+?)\s+on\s+spotify|search\s+spotify\s+for\s+(.+)|play\s+spotify\s+(.+)|listen\s+to\s+(.+?)\s+on\s+spotify)$",
+            re.IGNORECASE,
+        )
+
+        # 29. LLM Provider Toggles & Air-Gapped Mode
+        self._air_gapped_enable_re = re.compile(
+            r"^(?:(?:switch\s+to|enable|turn\s+on|activate|set)\s+(?:local[- ]only|offline|air[- ]gapped|airgap|air[- ]gap)(?:\s+mode)?|air[- ]gapped\s+mode|air[- ]gap\s+mode|local[- ]only\s+mode|go\s+offline|disconnect\s+cloud)$",
+            re.IGNORECASE,
+        )
+        self._air_gapped_disable_re = re.compile(
+            r"^(?:(?:switch\s+to|enable|turn\s+on|activate|set)\s+(?:cloud|online)(?:\s+mode)?|disable\s+(?:air[- ]gapped|airgap|air[- ]gap|local[- ]only)(?:\s+mode)?|turn\s+off\s+(?:air[- ]gapped|airgap|air[- ]gap|local[- ]only)(?:\s+mode)?|go\s+online|connect\s+cloud)$",
+            re.IGNORECASE,
+        )
+        self._switch_provider_re = re.compile(
+            r"^(?:switch\s+(?:provider\s+)?to\s+(?:llm\s+|ai\s+|model\s+)?|switch\s+to\s+(?:llm\s+|ai\s+|model\s+)?(?:provider\s+)?|use\s+(?:llm\s+|ai\s+|model\s+)?(?:provider\s+)?|set\s+provider\s+to\s+)(groq|gemini|ollama|lmstudio|lm[- ]studio|local[- ]only|cloud)$",
+            re.IGNORECASE,
+        )
+
 
 
 
@@ -1196,6 +1228,57 @@ class IntentRouter:
                 risk_level=CommandRiskLevel.SAFE,
             )
 
+        # 8.9 LLM Provider & Air-Gapped Mode Toggles
+        if self._air_gapped_enable_re.match(text):
+            return CommandIntent(
+                intent_name="set_air_gap_mode",
+                action_name="set_air_gap_mode",
+                category=CommandCategory.SYSTEM,
+                confidence=1.0,
+                params={"enabled": True},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
+        if self._air_gapped_disable_re.match(text):
+            return CommandIntent(
+                intent_name="set_air_gap_mode",
+                action_name="set_air_gap_mode",
+                category=CommandCategory.SYSTEM,
+                confidence=1.0,
+                params={"enabled": False},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
+        m = self._switch_provider_re.match(text)
+        if m:
+            prov = m.group(1).strip().lower().replace(" ", "").replace("-", "")
+            if prov == "localonly":
+                return CommandIntent(
+                    intent_name="set_air_gap_mode",
+                    action_name="set_air_gap_mode",
+                    category=CommandCategory.SYSTEM,
+                    confidence=1.0,
+                    params={"enabled": True},
+                    risk_level=CommandRiskLevel.LOW,
+                )
+            if prov == "cloud":
+                return CommandIntent(
+                    intent_name="set_air_gap_mode",
+                    action_name="set_air_gap_mode",
+                    category=CommandCategory.SYSTEM,
+                    confidence=1.0,
+                    params={"enabled": False},
+                    risk_level=CommandRiskLevel.LOW,
+                )
+            return CommandIntent(
+                intent_name="switch_llm_provider",
+                action_name="switch_llm_provider",
+                category=CommandCategory.SYSTEM,
+                confidence=1.0,
+                params={"provider": prov},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
         # 9. Window Management Checks
         if self._win_desktop_re.match(text):
             return CommandIntent(
@@ -1567,6 +1650,49 @@ class IntentRouter:
                     params={"contact": contact, "message": msg},
                     risk_level=CommandRiskLevel.LOW,
                 )
+
+        # 14.8 Spotify & Media Controls
+        m = self._spotify_search_re.match(text)
+        if m:
+            query = (m.group(1) or m.group(2) or m.group(3) or m.group(4) or "").strip()
+            return CommandIntent(
+                intent_name="spotify_play_query",
+                action_name="spotify_play_query",
+                category=CommandCategory.APPLICATION,
+                confidence=1.0,
+                params={"query": query},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
+        if self._spotify_play_pause_re.match(text):
+            return CommandIntent(
+                intent_name="spotify_play_pause",
+                action_name="spotify_play_pause",
+                category=CommandCategory.APPLICATION,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
+        if self._spotify_next_re.match(text):
+            return CommandIntent(
+                intent_name="spotify_next_track",
+                action_name="spotify_next_track",
+                category=CommandCategory.APPLICATION,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.LOW,
+            )
+
+        if self._spotify_prev_re.match(text):
+            return CommandIntent(
+                intent_name="spotify_previous_track",
+                action_name="spotify_previous_track",
+                category=CommandCategory.APPLICATION,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.LOW,
+            )
 
         # 15. Application Launch & Close
         m = self._app_open_re.match(text)
