@@ -46,11 +46,13 @@ class DenverSidebarWidget(QWidget):
     def __init__(self, controller: UIController | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.setFixedWidth(200)
+        self.setFixedWidth(184)
         self.setObjectName("DenverSidebar")
         self.setStyleSheet("""
             QWidget#DenverSidebar {
-                background: transparent;
+                background-color: rgba(8, 14, 28, 0.65);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 16px;
             }
         """)
         self._init_ui()
@@ -60,17 +62,17 @@ class DenverSidebarWidget(QWidget):
             return
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 16, 8, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 16, 10, 16)
+        layout.setSpacing(6)
 
         # 1. Main Navigation Items
         self.nav_btns: dict[str, QPushButton] = {}
         nav_items = [
-            ("Home", "🏠", True),
+            ("Home", "⌂", True),
             ("Assistant", "💬", False),
             ("Files", "📁", False),
-            ("Tools", "🔲", False),
-            ("Settings", "⚙️", False),
+            ("Tools", "⊞", False),
+            ("Settings", "⚙", False),
         ]
 
         for name, icon, is_active in nav_items:
@@ -84,9 +86,9 @@ class DenverSidebarWidget(QWidget):
         qa_header = QHBoxLayout()
         qa_header.setSpacing(6)
         qa_icon = QLabel("⚡")
-        qa_icon.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 11px;")
+        qa_icon.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 13px;")
         qa_title = QLabel("Quick Actions")
-        qa_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
+        qa_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700; letter-spacing: 0.3px;")
         qa_header.addWidget(qa_icon)
         qa_header.addWidget(qa_title)
         qa_header.addStretch()
@@ -96,19 +98,19 @@ class DenverSidebarWidget(QWidget):
         grid = QGridLayout()
         grid.setSpacing(8)
 
-        self.btn_task = self._create_action_card("New Task", "📝", GRADIENT_BTN_TASK)
+        self.btn_task = self._create_action_card("New Task", "📝", "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1E40AF, stop:1 #2563EB)")
         self.btn_task.clicked.connect(self._on_new_task)
         grid.addWidget(self.btn_task, 0, 0)
 
-        self.btn_reminder = self._create_action_card("Reminder", "📅", GRADIENT_BTN_REMINDER)
+        self.btn_reminder = self._create_action_card("Reminder", "📅", "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0D9488, stop:1 #06B6D4)")
         self.btn_reminder.clicked.connect(self._on_new_reminder)
         grid.addWidget(self.btn_reminder, 0, 1)
 
-        self.btn_calendar = self._create_action_card("Calendar", "📅", GRADIENT_BTN_CALENDAR)
+        self.btn_calendar = self._create_action_card("Calendar", "📅", "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6D28D9, stop:1 #8B5CF6)")
         self.btn_calendar.clicked.connect(self._on_calendar)
         grid.addWidget(self.btn_calendar, 1, 0)
 
-        self.btn_notes = self._create_action_card("Notes", "📄", GRADIENT_BTN_NOTES)
+        self.btn_notes = self._create_action_card("Notes", "📄", "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1E3A8A, stop:1 #3B82F6)")
         self.btn_notes.clicked.connect(self._on_notes)
         grid.addWidget(self.btn_notes, 1, 1)
 
@@ -116,17 +118,17 @@ class DenverSidebarWidget(QWidget):
 
     def _create_nav_button(self, name: str, icon: str, is_active: bool) -> QPushButton:
         btn = QPushButton(f"  {icon}   {name}")
-        btn.setFixedHeight(36)
+        btn.setFixedHeight(38)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         if is_active:
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(56, 189, 248, 0.22), stop:1 rgba(37, 99, 235, 0.08));
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(0, 180, 255, 0.28), stop:1 rgba(139, 92, 246, 0.12));
                     color: #FFFFFF;
                     border: none;
-                    border-left: 3px solid {PRIMARY_CYAN};
-                    border-radius: 6px;
+                    border-left: 3px solid #00E5FF;
+                    border-radius: 8px;
                     font-size: 12px;
                     font-weight: 700;
                     text-align: left;
@@ -140,7 +142,7 @@ class DenverSidebarWidget(QWidget):
                     color: {TEXT_SECONDARY};
                     border: none;
                     border-left: 3px solid transparent;
-                    border-radius: 6px;
+                    border-radius: 8px;
                     font-size: 12px;
                     font-weight: 600;
                     text-align: left;
@@ -158,15 +160,14 @@ class DenverSidebarWidget(QWidget):
     def _on_nav_clicked(self, name: str) -> None:
         for n, b in self.nav_btns.items():
             is_active = (n == name)
-            # Update styling
             if is_active:
                 b.setStyleSheet(f"""
                     QPushButton {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(56, 189, 248, 0.22), stop:1 rgba(37, 99, 235, 0.08));
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(0, 180, 255, 0.28), stop:1 rgba(139, 92, 246, 0.12));
                         color: #FFFFFF;
                         border: none;
-                        border-left: 3px solid {PRIMARY_CYAN};
-                        border-radius: 6px;
+                        border-left: 3px solid #00E5FF;
+                        border-radius: 8px;
                         font-size: 12px;
                         font-weight: 700;
                         text-align: left;
@@ -180,7 +181,7 @@ class DenverSidebarWidget(QWidget):
                         color: {TEXT_SECONDARY};
                         border: none;
                         border-left: 3px solid transparent;
-                        border-radius: 6px;
+                        border-radius: 8px;
                         font-size: 12px;
                         font-weight: 600;
                         text-align: left;
@@ -195,21 +196,21 @@ class DenverSidebarWidget(QWidget):
 
     def _create_action_card(self, title: str, icon: str, gradient: str) -> QPushButton:
         btn = QPushButton(f"{icon}\n{title}")
-        btn.setFixedSize(86, 68)
+        btn.setFixedSize(78, 62)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
             QPushButton {{
                 background: {gradient};
                 color: #FFFFFF;
                 border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 10px;
-                font-size: 11px;
+                border-radius: 12px;
+                font-size: 10px;
                 font-weight: 700;
                 line-height: 1.3;
                 padding: 4px;
             }}
             QPushButton:hover {{
-                border: 1px solid rgba(255, 255, 255, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.45);
             }}
             QPushButton:pressed {{
                 background: rgba(14, 165, 233, 0.85);

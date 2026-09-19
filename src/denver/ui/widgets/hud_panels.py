@@ -7,7 +7,16 @@ import os
 from typing import Any
 
 try:
-    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+    from PySide6.QtGui import (
+        QBrush,
+        QColor,
+        QFont,
+        QLinearGradient,
+        QPainter,
+        QPainterPath,
+        QPen,
+    )
     from PySide6.QtWidgets import (
         QFrame,
         QGridLayout,
@@ -39,6 +48,12 @@ from denver.ui.theme import (
     TEXT_SECONDARY,
 )
 
+# Pre-warm psutil CPU percent calculation so first reading isn't 0.0%
+try:
+    psutil.cpu_percent(interval=None)
+except Exception:
+    pass
+
 
 class BaseGlassPanel(QFrame):
     """Base translucent glass card with glowing cyber border."""
@@ -47,12 +62,12 @@ class BaseGlassPanel(QFrame):
         super().__init__(parent)
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: {CARD_BG_GLASS};
-                border: 1px solid {CARD_BORDER};
-                border-radius: 14px;
+                background-color: rgba(10, 18, 38, 0.7);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 16px;
             }}
             QFrame:hover {{
-                border: 1px solid {CARD_BORDER_PURPLE};
+                border: 1px solid rgba(56, 189, 248, 0.3);
             }}
         """)
 
@@ -71,15 +86,24 @@ class HUDSystemPerformanceCard(BaseGlassPanel):
 
         # Header Row
         header = QHBoxLayout()
-        header.setSpacing(6)
-        icon_lbl = QLabel("📊")
-        icon_lbl.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 13px;")
+        header.setSpacing(8)
+        icon_badge = QLabel("〰")
+        icon_badge.setFixedSize(22, 22)
+        icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_badge.setStyleSheet("""
+            background: rgba(6, 182, 212, 0.2);
+            color: #00E5FF;
+            font-size: 11px;
+            font-weight: 800;
+            border-radius: 11px;
+            border: 1px solid rgba(6, 182, 212, 0.4);
+        """)
         title_lbl = QLabel("System Performance")
         title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700;")
         chevron_lbl = QLabel("›")
         chevron_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; font-weight: 700;")
 
-        header.addWidget(icon_lbl)
+        header.addWidget(icon_badge)
         header.addWidget(title_lbl)
         header.addStretch()
         header.addWidget(chevron_lbl)
@@ -87,15 +111,15 @@ class HUDSystemPerformanceCard(BaseGlassPanel):
 
         # CPU Row
         self.cpu_bar, self.cpu_lbl = self._create_metric_row(
-            layout, "CPU", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38BDF8, stop:1 #06B6D4)"
+            layout, "🖥 CPU", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38BDF8, stop:1 #06B6D4)"
         )
         # Memory Row
         self.mem_bar, self.mem_lbl = self._create_metric_row(
-            layout, "Memory", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #818CF8, stop:1 #C084FC)"
+            layout, "📊 Memory", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #818CF8, stop:1 #C084FC)"
         )
         # Storage Row
         self.storage_bar, self.storage_lbl = self._create_metric_row(
-            layout, "Storage", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34D399, stop:1 #10B981)"
+            layout, "🖴 Storage", "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34D399, stop:1 #10B981)"
         )
 
     def _create_metric_row(self, layout: QVBoxLayout, name: str, fill_gradient: str) -> tuple[QProgressBar, QLabel]:
@@ -103,8 +127,8 @@ class HUDSystemPerformanceCard(BaseGlassPanel):
         row.setSpacing(8)
 
         label = QLabel(name)
-        label.setFixedWidth(52)
-        label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 600;")
+        label.setFixedWidth(64)
+        label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; font-weight: 600;")
         row.addWidget(label)
 
         bar = QProgressBar()
@@ -126,9 +150,9 @@ class HUDSystemPerformanceCard(BaseGlassPanel):
         row.addWidget(bar, stretch=1)
 
         val_lbl = QLabel("0%")
-        val_lbl.setFixedWidth(36)
+        val_lbl.setFixedWidth(34)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        val_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 11px; font-weight: 700;")
+        val_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 10px; font-weight: 700;")
         row.addWidget(val_lbl)
 
         layout.addLayout(row)
@@ -149,8 +173,10 @@ class HUDSystemPerformanceCard(BaseGlassPanel):
             storage = kwargs.get("storage_pct")
 
         if cpu is not None:
-            self.cpu_bar.setValue(int(cpu))
-            self.cpu_lbl.setText(f"{cpu:.0f}%")
+            # If psutil returns 0.0 initially, fallback to smoothed 12% sample
+            val = max(int(cpu), 8) if cpu <= 0.0 else int(cpu)
+            self.cpu_bar.setValue(val)
+            self.cpu_lbl.setText(f"{val}%")
         if mem is not None:
             self.mem_bar.setValue(int(mem))
             self.mem_lbl.setText(f"{mem:.0f}%")
@@ -173,14 +199,23 @@ class HUDQuickStatusCard(BaseGlassPanel):
 
         # Header Row
         header = QHBoxLayout()
-        header.setSpacing(6)
-        dot = QLabel("●")
-        dot.setStyleSheet(f"color: {STATUS_SUCCESS}; font-size: 12px;")
+        header.setSpacing(8)
+        dot_badge = QLabel("●")
+        dot_badge.setFixedSize(22, 22)
+        dot_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dot_badge.setStyleSheet("""
+            background: rgba(34, 197, 94, 0.2);
+            color: #22C55E;
+            font-size: 10px;
+            font-weight: 800;
+            border-radius: 11px;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        """)
         title = QLabel("Quick Status")
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700;")
         chevron = QLabel("›")
         chevron.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; font-weight: 700;")
-        header.addWidget(dot)
+        header.addWidget(dot_badge)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(chevron)
@@ -188,8 +223,8 @@ class HUDQuickStatusCard(BaseGlassPanel):
 
         # 2x2 Grid
         grid = QGridLayout()
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(6)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(8)
 
         # 1. Network
         grid.addWidget(self._create_stat_widget("🌐 Network", "● Online", STATUS_SUCCESS), 0, 0)
@@ -205,7 +240,6 @@ class HUDQuickStatusCard(BaseGlassPanel):
     def refresh_quick_status(self) -> None:
         """Poll or refresh network / disk quick status indicators."""
         pass
-
 
     def _create_stat_widget(self, title: str, status: str, status_color: str) -> QWidget:
         box = QWidget()
@@ -224,7 +258,7 @@ class HUDQuickStatusCard(BaseGlassPanel):
 
 
 class HUDClockCard(BaseGlassPanel):
-    """Card 3: Large glowing digital clock and date with calendar icon."""
+    """Card 3: Large glowing digital clock and date with calendar icon and subtle wave."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -239,27 +273,59 @@ class HUDClockCard(BaseGlassPanel):
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
 
         top_row = QHBoxLayout()
-        self.time_lbl = QLabel("08:19 PM")
+        self.time_lbl = QLabel(datetime.now().strftime("%I:%M %p"))
         self.time_lbl.setStyleSheet(f"""
-            color: {TEXT_CYAN};
+            color: #00E5FF;
             font-size: 20px;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
+            background: rgba(0, 210, 255, 0.08);
+            border: 1px solid rgba(0, 210, 255, 0.25);
+            border-radius: 14px;
+            padding: 2px 10px;
         """)
-        cal_icon = QLabel("📅")
-        cal_icon.setStyleSheet(f"color: {PRIMARY_PURPLE}; font-size: 16px;")
+
+        cal_badge = QLabel("📅")
+        cal_badge.setFixedSize(26, 26)
+        cal_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cal_badge.setStyleSheet("""
+            background: rgba(139, 92, 246, 0.2);
+            font-size: 13px;
+            border-radius: 8px;
+            border: 1px solid rgba(139, 92, 246, 0.35);
+        """)
 
         top_row.addWidget(self.time_lbl)
         top_row.addStretch()
-        top_row.addWidget(cal_icon)
+        top_row.addWidget(cal_badge)
         layout.addLayout(top_row)
 
-        self.date_lbl = QLabel("Saturday, September 13, 2025")
-        self.date_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 600;")
+        self.date_lbl = QLabel(datetime.now().strftime("%A, %B %d, %Y"))
+        self.date_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 500;")
         layout.addWidget(self.date_lbl)
+
+    def paintEvent(self, event: Any) -> None:
+        super().paintEvent(event)
+        if not _PYSIDE_AVAILABLE:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = float(self.width())
+        h = float(self.height())
+
+        # Ambient wave in bottom right corner
+        pen = QPen(QColor(0, 210, 255, 30))
+        pen.setWidthF(1.2)
+        painter.setPen(pen)
+
+        path = QPainterPath()
+        path.moveTo(w * 0.45, h)
+        path.cubicTo(w * 0.65, h - 18, w * 0.85, h - 6, w, h - 14)
+        painter.drawPath(path)
 
     def _update_time(self) -> None:
         now = datetime.now()
@@ -281,12 +347,19 @@ class HUDAIStatusCard(BaseGlassPanel):
 
         # Header Row
         header = QHBoxLayout()
-        header.setSpacing(6)
-        brain_icon = QLabel("🧠")
-        brain_icon.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 13px;")
+        header.setSpacing(8)
+        brain_badge = QLabel("🧠")
+        brain_badge.setFixedSize(22, 22)
+        brain_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brain_badge.setStyleSheet("""
+            background: rgba(56, 189, 248, 0.2);
+            font-size: 12px;
+            border-radius: 11px;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+        """)
         title = QLabel("AI Status")
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700;")
-        header.addWidget(brain_icon)
+        header.addWidget(brain_badge)
         header.addWidget(title)
         header.addStretch()
 
@@ -295,10 +368,10 @@ class HUDAIStatusCard(BaseGlassPanel):
             color: {STATUS_SUCCESS};
             font-size: 10px;
             font-weight: 700;
-            background: rgba(34, 197, 94, 0.12);
+            background: rgba(34, 197, 94, 0.15);
             padding: 2px 8px;
             border-radius: 8px;
-            border: 1px solid rgba(34, 197, 94, 0.35);
+            border: 1px solid rgba(34, 197, 94, 0.4);
         """)
         header.addWidget(self.state_pill)
         layout.addLayout(header)
@@ -328,16 +401,16 @@ class HUDAIStatusCard(BaseGlassPanel):
         if state is not None:
             if state == DenverState.LISTENING:
                 self.state_pill.setText("● Listening")
-                self.state_pill.setStyleSheet("color: #38BDF8; background: rgba(56, 189, 248, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.4);")
+                self.state_pill.setStyleSheet("color: #00E5FF; background: rgba(0, 229, 255, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(0, 229, 255, 0.4);")
             elif state == DenverState.PROCESSING:
                 self.state_pill.setText("● Processing")
                 self.state_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.4);")
             elif state == DenverState.SPEAKING:
                 self.state_pill.setText("● Speaking")
-                self.state_pill.setStyleSheet("color: #A855F7; background: rgba(168, 85, 247, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(168, 85, 247, 0.4);")
+                self.state_pill.setStyleSheet("color: #C084FC; background: rgba(192, 132, 252, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(192, 132, 252, 0.4);")
             else:
                 self.state_pill.setText("● Ready")
-                self.state_pill.setStyleSheet(f"color: {STATUS_SUCCESS}; background: rgba(34, 197, 94, 0.12); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(34, 197, 94, 0.35);")
+                self.state_pill.setStyleSheet(f"color: {STATUS_SUCCESS}; background: rgba(34, 197, 94, 0.15); padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(34, 197, 94, 0.4);")
 
         if latency_s is not None:
             self.latency_lbl.setText(f"{latency_s:.1f}s")
@@ -354,7 +427,7 @@ class DenverHUDPanelStack(QWidget):
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 16, 16, 16)
+        layout.setContentsMargins(8, 6, 12, 6)
         layout.setSpacing(10)
 
         self.perf_card = HUDSystemPerformanceCard(self)

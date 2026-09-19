@@ -37,7 +37,8 @@ class DenverAIOrbWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(220, 180)
+        self.setFixedHeight(180)
+        self.setMinimumWidth(380)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._pulse_phase = 0.0
@@ -89,100 +90,125 @@ class DenverAIOrbWidget(QWidget):
         self._draw_background_waves(painter, cx, cy, pulse)
 
         # Outer Neon Halo Glow
-        halo_radius = 64.0 + pulse * 4.0
-        halo_grad = QRadialGradient(cx, cy, halo_radius + 20)
-        halo_grad.setColorAt(0.0, QColor(56, 189, 248, 60))
-        halo_grad.setColorAt(0.5, QColor(139, 92, 246, 35))
-        halo_grad.setColorAt(0.85, QColor(37, 99, 235, 15))
-        halo_grad.setColorAt(1.0, QColor(6, 10, 19, 0))
+        halo_radius = 68.0 + pulse * 4.0
+        halo_grad = QRadialGradient(cx, cy, halo_radius + 32)
+        halo_grad.setColorAt(0.0, QColor(0, 210, 255, 95))
+        halo_grad.setColorAt(0.4, QColor(59, 130, 246, 60))
+        halo_grad.setColorAt(0.7, QColor(139, 92, 246, 35))
+        halo_grad.setColorAt(1.0, QColor(6, 11, 23, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(halo_grad))
-        painter.drawEllipse(QPointF(cx, cy), halo_radius + 20, halo_radius + 20)
+        painter.drawEllipse(QPointF(cx, cy), halo_radius + 32, halo_radius + 32)
 
-        # Concentric Outer Ring 1 (Cyan/Purple gradient)
+        # Concentric Outer Ring 1 (Cyan/Purple glowing neon gradient)
         pen1 = QPen()
-        pen1.setWidthF(2.5)
-        pen_grad = QLinearGradient(cx - 50, cy - 50, cx + 50, cy + 50)
+        pen1.setWidthF(3.0)
+        pen_grad = QLinearGradient(cx - 60, cy - 60, cx + 60, cy + 60)
         if self._state == DenverState.LISTENING:
-            pen_grad.setColorAt(0.0, QColor("#22C55E"))
-            pen_grad.setColorAt(1.0, QColor("#06B6D4"))
+            pen_grad.setColorAt(0.0, QColor("#00E5FF"))
+            pen_grad.setColorAt(1.0, QColor("#3B82F6"))
         elif self._state == DenverState.PROCESSING:
             pen_grad.setColorAt(0.0, QColor("#F59E0B"))
             pen_grad.setColorAt(1.0, QColor("#EC4899"))
+        elif self._state == DenverState.SPEAKING:
+            pen_grad.setColorAt(0.0, QColor("#A855F7"))
+            pen_grad.setColorAt(1.0, QColor("#6366F1"))
         else:
-            pen_grad.setColorAt(0.0, QColor("#38BDF8"))
+            pen_grad.setColorAt(0.0, QColor("#00D2FF"))
+            pen_grad.setColorAt(0.6, QColor("#3B82F6"))
             pen_grad.setColorAt(1.0, QColor("#A855F7"))
         pen1.setBrush(QBrush(pen_grad))
         painter.setPen(pen1)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(QPointF(cx, cy), 58.0, 58.0)
+        painter.drawEllipse(QPointF(cx, cy), 62.0, 62.0)
 
-        # Concentric Inner Ring 2 (Thin subtle border)
-        pen2 = QPen(QColor(56, 189, 248, 80))
-        pen2.setWidthF(1.2)
+        # Concentric Inner Ring 2 (Thin subtle glowing purple/cyan border)
+        pen2 = QPen(QColor(139, 92, 246, 120))
+        pen2.setWidthF(1.5)
         painter.setPen(pen2)
-        painter.drawEllipse(QPointF(cx, cy), 52.0, 52.0)
+        painter.drawEllipse(QPointF(cx, cy), 54.0, 54.0)
 
         # Core Circular Glass Body
-        core_grad = QRadialGradient(cx - 10, cy - 10, 50)
-        core_grad.setColorAt(0.0, QColor(26, 46, 92))
-        core_grad.setColorAt(0.65, QColor(13, 23, 46))
-        core_grad.setColorAt(1.0, QColor(8, 14, 28))
+        core_grad = QRadialGradient(cx - 12, cy - 14, 52)
+        core_grad.setColorAt(0.0, QColor(24, 48, 96))
+        core_grad.setColorAt(0.65, QColor(10, 20, 42))
+        core_grad.setColorAt(1.0, QColor(5, 10, 22))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(core_grad))
-        painter.drawEllipse(QPointF(cx, cy), 48.0, 48.0)
+        painter.drawEllipse(QPointF(cx, cy), 50.0, 50.0)
 
         # Denver Futuristic 'A' Monogram in center
         self._draw_a_monogram(painter, cx, cy)
 
     def _draw_background_waves(self, painter: QPainter, cx: float, cy: float, pulse: float) -> None:
         """Draw subtle horizontal glowing wave curves extending left and right."""
-        pen = QPen(QColor(56, 189, 248, 28))
-        pen.setWidthF(1.2)
-        painter.setPen(pen)
+        w = self.width()
+
+        # Cyan primary wave
+        pen_cyan = QPen(QColor(0, 210, 255, 45))
+        pen_cyan.setWidthF(1.5)
+        painter.setPen(pen_cyan)
 
         path1 = QPainterPath()
-        path1.moveTo(0, cy + 8)
+        path1.moveTo(0, cy + 6)
         path1.cubicTo(
-            cx * 0.5, cy + 18 + pulse * 6,
-            cx * 0.75, cy - 12 - pulse * 4,
-            cx - 55, cy
+            cx * 0.45, cy + 24 + pulse * 7,
+            cx * 0.75, cy - 20 - pulse * 5,
+            cx - 62, cy
         )
         painter.drawPath(path1)
 
         path2 = QPainterPath()
-        path2.moveTo(cx + 55, cy)
+        path2.moveTo(cx + 62, cy)
         path2.cubicTo(
-            cx + (self.width() - cx) * 0.25, cy - 14 - pulse * 5,
-            cx + (self.width() - cx) * 0.65, cy + 16 + pulse * 4,
-            self.width(), cy - 6
+            cx + (w - cx) * 0.25, cy - 22 - pulse * 6,
+            cx + (w - cx) * 0.65, cy + 22 + pulse * 5,
+            w, cy - 8
         )
         painter.drawPath(path2)
 
-        # Secondary subtle purple wave
-        pen_purple = QPen(QColor(168, 85, 247, 20))
-        pen_purple.setWidthF(1.0)
+        # Purple secondary ambient wave
+        pen_purple = QPen(QColor(168, 85, 247, 30))
+        pen_purple.setWidthF(1.2)
         painter.setPen(pen_purple)
+
         path3 = QPainterPath()
-        path3.moveTo(10, cy - 10)
-        path3.cubicTo(cx * 0.45, cy - 20, cx * 0.8, cy + 15, cx - 50, cy + 6)
+        path3.moveTo(0, cy - 14)
+        path3.cubicTo(cx * 0.4, cy - 28, cx * 0.78, cy + 20, cx - 58, cy + 8)
         painter.drawPath(path3)
 
         path4 = QPainterPath()
-        path4.moveTo(cx + 50, cy + 6)
-        path4.cubicTo(cx + (self.width() - cx) * 0.35, cy + 18, cx + (self.width() - cx) * 0.7, cy - 16, self.width() - 10, cy + 4)
+        path4.moveTo(cx + 58, cy + 8)
+        path4.cubicTo(cx + (w - cx) * 0.35, cy + 26, cx + (w - cx) * 0.72, cy - 24, w, cy + 6)
         painter.drawPath(path4)
 
     def _draw_a_monogram(self, painter: QPainter, cx: float, cy: float) -> None:
-        """Draw modern stylized Denver 'A' monogram with vivid cyan-to-purple gradient."""
-        font = QFont("Segoe UI", 26, QFont.Weight.Black)
-        painter.setFont(font)
+        """Draw sleek modern geometric 'A' monogram matching Image 2 reference."""
+        # Gradient for the monogram
+        grad = QLinearGradient(cx, cy - 22, cx, cy + 22)
+        grad.setColorAt(0.0, QColor("#00E5FF"))
+        grad.setColorAt(0.5, QColor("#818CF8"))
+        grad.setColorAt(1.0, QColor("#C084FC"))
 
-        text_grad = QLinearGradient(cx - 15, cy - 20, cx + 15, cy + 20)
-        text_grad.setColorAt(0.0, QColor("#38BDF8"))
-        text_grad.setColorAt(0.5, QColor("#818CF8"))
-        text_grad.setColorAt(1.0, QColor("#C084FC"))
+        # Draw stylized geometric triangular A with cross cutout
+        path = QPainterPath()
+        # Outer triangle with rounded apex
+        path.moveTo(cx - 20, cy + 20)
+        path.lineTo(cx - 4, cy - 18)
+        path.quadTo(cx, cy - 22, cx + 4, cy - 18)
+        path.lineTo(cx + 20, cy + 20)
+        path.lineTo(cx + 10, cy + 20)
+        path.lineTo(cx + 6, cy + 8)
+        path.lineTo(cx - 6, cy + 8)
+        path.lineTo(cx - 10, cy + 20)
+        path.closeSubpath()
 
-        painter.setPen(QPen(QBrush(text_grad), 1.0))
-        rect = QRectF(cx - 24, cy - 22, 48, 44)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "A")
+        # Inner triangular cutout
+        path.moveTo(cx, cy - 8)
+        path.lineTo(cx + 4, cy + 2)
+        path.lineTo(cx - 4, cy + 2)
+        path.closeSubpath()
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)

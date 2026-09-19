@@ -12,8 +12,17 @@ import os
 from typing import Any
 
 try:
-    from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-    from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter
+    from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
+    from PySide6.QtGui import (
+        QBrush,
+        QColor,
+        QFont,
+        QIcon,
+        QLinearGradient,
+        QPainter,
+        QPainterPath,
+        QPen,
+    )
     from PySide6.QtWidgets import (
         QFrame,
         QGraphicsDropShadowEffect,
@@ -62,16 +71,49 @@ from denver.ui.theme import (
 )
 from denver.ui.widgets.ai_orb import DenverAIOrbWidget
 from denver.ui.widgets.confirmation_dialog import SecurityConfirmationDialog
-from denver.ui.widgets.home_dashboard import WeatherCard, _get_disk_storage_info
 from denver.ui.widgets.hud_panels import DenverHUDPanelStack
 from denver.ui.widgets.settings_dialog import SettingsDialog
 from denver.ui.widgets.sidebar import DenverSidebarWidget
+from denver.ui.widgets.weather_glass import ModernWeatherGlassCard
 
 logger = get_logger("ui.window")
 
 
+class GradientTextLabel(QLabel):
+    """Renders crisp gradient text using QPainter with QLinearGradient."""
+
+    def __init__(
+        self,
+        text: str,
+        start_color: str = "#00D2FF",
+        end_color: str = "#C084FC",
+        font_size: int = 19,
+        font_weight: int = 700,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self._start_color = QColor(start_color)
+        self._end_color = QColor(end_color)
+        if _PYSIDE_AVAILABLE:
+            font = QFont("Segoe UI", font_size, font_weight)
+            self.setFont(font)
+            self.setFixedHeight(30)
+
+    def paintEvent(self, event: Any) -> None:
+        if not _PYSIDE_AVAILABLE:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        grad = QLinearGradient(0, 0, self.fontMetrics().horizontalAdvance(self.text()) + 10, 0)
+        grad.setColorAt(0.0, self._start_color)
+        grad.setColorAt(1.0, self._end_color)
+        painter.setPen(QPen(QBrush(grad), 1.0))
+        painter.setFont(self.font())
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+
+
 class TopNavBar(QWidget):
-    """Custom sleek top title bar with logo, breadcrumb, settings, and window controls."""
+    """Custom sleek top title bar with stylized logo, notifications, and window controls."""
 
     settings_requested = Signal()
     minimize_requested = Signal()
@@ -82,11 +124,11 @@ class TopNavBar(QWidget):
         super().__init__(parent)
         self.setFixedHeight(46)
         self.setObjectName("TopNavBar")
-        self.setStyleSheet(f"""
-            QWidget#TopNavBar {{
-                background-color: rgba(10, 15, 29, 0.95);
-                border-bottom: 1px solid rgba(56, 189, 248, 0.12);
-            }}
+        self.setStyleSheet("""
+            QWidget#TopNavBar {
+                background-color: rgba(6, 11, 23, 0.96);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
         """)
         self._drag_pos: QPoint | None = None
         self._init_ui()
@@ -96,57 +138,56 @@ class TopNavBar(QWidget):
             return
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 12, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 0, 16, 0)
+        layout.setSpacing(12)
 
-        # 1. Left: Gradient Monogram Badge + Title
+        # 1. Left: Gradient Monogram Badge + App Title
         logo_badge = QLabel("A")
-        logo_badge.setFixedSize(26, 26)
+        logo_badge.setFixedSize(28, 28)
         logo_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_badge.setStyleSheet("""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #38BDF8, stop:1 #8B5CF6);
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00E5FF, stop:1 #8B5CF6);
             color: #FFFFFF;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 900;
-            border-radius: 7px;
+            border-radius: 8px;
         """)
         layout.addWidget(logo_badge)
 
         title_lbl = QLabel(product_name)
-        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 700;")
+        title_lbl.setStyleSheet("color: #FFFFFF; font-size: 14px; font-weight: 700; letter-spacing: -0.2px;")
         layout.addWidget(title_lbl)
 
-        sep_lbl = QLabel("/")
-        sep_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 400;")
-        layout.addWidget(sep_lbl)
-
         dash_lbl = QLabel("Home Dashboard")
-        dash_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        dash_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 500; margin-left: 10px;")
         layout.addWidget(dash_lbl)
 
         layout.addStretch(1)
 
-        # 2. Right: Notification Bell, Settings, Window Controls
+        # 2. Right: Notification Bell (with unread badge), Settings, Window Controls
         self.bell_btn = QPushButton("🔔")
         self.bell_btn.setToolTip("Notifications")
-        self.bell_btn.setFixedSize(30, 30)
+        self.bell_btn.setFixedSize(32, 32)
         self.bell_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bell_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {TEXT_SECONDARY};
                 border: none;
-                border-radius: 6px;
-                font-size: 13px;
+                font-size: 14px;
             }}
             QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.08);
-                color: {PRIMARY_CYAN};
+                color: #00E5FF;
             }}
         """)
+        dot = QLabel(self.bell_btn)
+        dot.setFixedSize(6, 6)
+        dot.move(20, 4)
+        dot.setStyleSheet("background: #EF4444; border-radius: 3px;")
         layout.addWidget(self.bell_btn)
 
-        self.settings_btn = QPushButton("⚙️")
+
+        self.settings_btn = QPushButton("⚙")
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setFixedSize(30, 30)
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -155,12 +196,10 @@ class TopNavBar(QWidget):
                 background: transparent;
                 color: {TEXT_SECONDARY};
                 border: none;
-                border-radius: 6px;
-                font-size: 13px;
+                font-size: 14px;
             }}
             QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.08);
-                color: {PRIMARY_CYAN};
+                color: #00E5FF;
             }}
         """)
         self.settings_btn.clicked.connect(self.settings_requested.emit)
@@ -169,25 +208,23 @@ class TopNavBar(QWidget):
         # Window Controls Divider
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFixedHeight(18)
-        sep.setStyleSheet("color: rgba(255, 255, 255, 0.15);")
+        sep.setFixedHeight(16)
+        sep.setStyleSheet("color: rgba(255, 255, 255, 0.1);")
         layout.addWidget(sep)
 
         # Minimize
         min_btn = QPushButton("─")
-        min_btn.setFixedSize(30, 30)
+        min_btn.setFixedSize(28, 28)
         min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         min_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {TEXT_SECONDARY};
                 border: none;
-                border-radius: 6px;
                 font-size: 12px;
             }}
             QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.08);
-                color: {TEXT_PRIMARY};
+                color: #FFFFFF;
             }}
         """)
         min_btn.clicked.connect(self.minimize_requested.emit)
@@ -195,19 +232,17 @@ class TopNavBar(QWidget):
 
         # Maximize / Restore
         max_btn = QPushButton("□")
-        max_btn.setFixedSize(30, 30)
+        max_btn.setFixedSize(28, 28)
         max_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         max_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {TEXT_SECONDARY};
                 border: none;
-                border-radius: 6px;
                 font-size: 12px;
             }}
             QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.08);
-                color: {TEXT_PRIMARY};
+                color: #FFFFFF;
             }}
         """)
         max_btn.clicked.connect(self.maximize_requested.emit)
@@ -215,19 +250,19 @@ class TopNavBar(QWidget):
 
         # Close
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(30, 30)
+        close_btn.setFixedSize(28, 28)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {TEXT_SECONDARY};
                 border: none;
-                border-radius: 6px;
                 font-size: 12px;
             }}
             QPushButton:hover {{
                 background: {STATUS_DANGER};
                 color: #FFFFFF;
+                border-radius: 4px;
             }}
         """)
         close_btn.clicked.connect(self.close_requested.emit)
@@ -255,11 +290,11 @@ class DenverBottomStatusBar(QWidget):
         super().__init__(parent)
         self.setFixedHeight(38)
         self.setObjectName("DenverBottomStatusBar")
-        self.setStyleSheet(f"""
-            QWidget#DenverBottomStatusBar {{
-                background-color: rgba(10, 15, 29, 0.95);
-                border-top: 1px solid rgba(56, 189, 248, 0.12);
-            }}
+        self.setStyleSheet("""
+            QWidget#DenverBottomStatusBar {
+                background-color: rgba(6, 11, 23, 0.96);
+                border-top: 1px solid rgba(255, 255, 255, 0.05);
+            }
         """)
         self._init_ui()
 
@@ -269,49 +304,44 @@ class DenverBottomStatusBar(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(18, 0, 18, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
-        # Left: Assistant Brand and Status
-        avatar = QLabel("D")
-        avatar.setFixedSize(20, 20)
+        # Left: Circular avatar icon + Brand + Status
+        avatar = QLabel("👤")
+        avatar.setFixedSize(22, 22)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         avatar.setStyleSheet("""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #06B6D4, stop:1 #3B82F6);
-            color: #FFFFFF;
+            background: rgba(30, 58, 138, 0.4);
             font-size: 11px;
-            font-weight: 800;
-            border-radius: 10px;
+            border-radius: 11px;
+            border: 1px solid rgba(59, 130, 246, 0.4);
         """)
         layout.addWidget(avatar)
 
         brand_lbl = QLabel(product_name)
-        brand_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 11px; font-weight: 700;")
+        brand_lbl.setStyleSheet("color: #FFFFFF; font-size: 11px; font-weight: 700;")
         layout.addWidget(brand_lbl)
 
         help_lbl = QLabel("● Always here to help")
-        help_lbl.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 11px; font-weight: 500;")
+        help_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 500;")
         layout.addWidget(help_lbl)
 
         layout.addStretch(1)
 
         # Right: Wave Bars + State
         self.wave_lbl = QLabel("ılılı.")
-        self.wave_lbl.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 13px; font-weight: 700; letter-spacing: 2px;")
+        self.wave_lbl.setStyleSheet("color: #8B5CF6; font-size: 14px; font-weight: 800; letter-spacing: 2px;")
         layout.addWidget(self.wave_lbl)
 
-        self.state_lbl = QLabel("Standby")
-        self.state_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 600;")
+        self.state_lbl = QLabel("Listening...")
+        self.state_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 600;")
         layout.addWidget(self.state_lbl)
-
-        ver_lbl = QLabel(f"v{__version__}")
-        ver_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
-        layout.addWidget(ver_lbl)
 
     def set_state(self, state: DenverState) -> None:
         if state == DenverState.LISTENING:
             self.state_lbl.setText("Listening...")
-            self.state_lbl.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 11px; font-weight: 600;")
-            self.wave_lbl.setStyleSheet("color: #38BDF8; font-size: 14px; font-weight: 800; letter-spacing: 3px;")
+            self.state_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 600;")
+            self.wave_lbl.setStyleSheet("color: #8B5CF6; font-size: 14px; font-weight: 800; letter-spacing: 2px;")
         elif state == DenverState.PROCESSING:
             self.state_lbl.setText("Processing...")
             self.state_lbl.setStyleSheet(f"color: {STATUS_WARNING}; font-size: 11px; font-weight: 600;")
@@ -345,7 +375,7 @@ class MainWindow(QMainWindow):
         if not _PYSIDE_AVAILABLE:
             return
 
-        # Root Central Widget with dark futuristic radial background
+        # Root Central Widget with dark futuristic background
         central = QWidget(self)
         central.setObjectName("DashboardCentral")
         central.setStyleSheet(f"""
@@ -372,7 +402,7 @@ class MainWindow(QMainWindow):
         body_widget = QWidget()
         body_layout = QHBoxLayout(body_widget)
         body_layout.setContentsMargins(12, 10, 12, 10)
-        body_layout.setSpacing(14)
+        body_layout.setSpacing(12)
 
         # COLUMN A: Left Sidebar Navigation & Quick Actions
         self.sidebar = DenverSidebarWidget(controller=self.controller, parent=self)
@@ -385,29 +415,38 @@ class MainWindow(QMainWindow):
         center_layout.setContentsMargins(10, 8, 10, 8)
         center_layout.setSpacing(12)
 
-        # B1. Top Row: Greeting + Weather Card
+        # B1. Top Row: Real-time Greeting + Modern Weather Glass Card
         top_stage_row = QHBoxLayout()
         top_stage_row.setSpacing(16)
 
         # Dynamic Greeting Block
         greeting_box = QVBoxLayout()
-        greeting_box.setSpacing(2)
+        greeting_box.setSpacing(1)
 
         hour = datetime.now().hour
         if 5 <= hour < 12:
             greet_text = "Good Morning,"
-        elif 12 <= hour < 18:
+        elif 12 <= hour < 17:
             greet_text = "Good Afternoon,"
-        else:
+        elif 17 <= hour < 21:
             greet_text = "Good Evening,"
+        else:
+            greet_text = "Good Night,"
 
         self.greet_lbl = QLabel(greet_text)
-        self.greet_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 23px; font-weight: 800; letter-spacing: -0.4px;")
+        self.greet_lbl.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: 700; letter-spacing: -0.3px;")
         greeting_box.addWidget(self.greet_lbl)
 
-        self.greet_sub = QLabel("Your AI Assistant is ready!")
-        self.greet_sub.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 19px; font-weight: 700; letter-spacing: -0.2px;")
+        # Gradient text: "Your AI Assistant is ready!"
+        self.greet_sub = GradientTextLabel(
+            "Your AI Assistant is ready!",
+            start_color="#00D2FF",
+            end_color="#C084FC",
+            font_size=20,
+            font_weight=700,
+        )
         greeting_box.addWidget(self.greet_sub)
+
 
         self.greet_desc = QLabel("Ask anything, get things done, stay productive.")
         self.greet_desc.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 500;")
@@ -415,13 +454,13 @@ class MainWindow(QMainWindow):
 
         top_stage_row.addLayout(greeting_box, stretch=1)
 
-        # Weather Card
-        self.weather_card = WeatherCard()
+        # Modern Weather Glass Card (shows real city, temp, condition)
+        self.weather_card = ModernWeatherGlassCard(self)
         top_stage_row.addWidget(self.weather_card, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
 
         center_layout.addLayout(top_stage_row)
 
-        # B2. Central AI Glowing Orb
+        # B2. Central AI Glowing Orb with radiant halo and wave lines
         orb_container = QHBoxLayout()
         orb_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ai_orb = DenverAIOrbWidget(self)
@@ -429,20 +468,20 @@ class MainWindow(QMainWindow):
         orb_container.addWidget(self.ai_orb)
         center_layout.addLayout(orb_container)
 
-        # B3. 4 Action Suggestion Pills
+        # B3. 4 Action Suggestion Pills (Styled matching Image 2 reference)
         pills_layout = QHBoxLayout()
-        pills_layout.setSpacing(10)
+        pills_layout.setSpacing(12)
         pills_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         pills_data = [
-            ("💬", "Answer Questions", "Denver, what can you help me with?"),
-            ("📄", "Write && Edit", "Denver, help me write a summary of today's tasks"),
-            ("📈", "Analyze Data", "Denver, analyze system performance and memory"),
-            ("📁", "Help with Files", "Denver, check recent project files"),
+            ("💬", "#1D4ED8", "Answer Questions", "Denver, what can you help me with?"),
+            ("📝", "#7C3AED", "Write & Edit", "Denver, help me write a summary of today's tasks"),
+            ("📈", "#0891B2", "Analyze Data", "Denver, analyze system performance and memory"),
+            ("📁", "#D97706", "Help with Files", "Denver, check recent project files"),
         ]
 
-        for icon, label, prompt in pills_data:
-            pill_btn = self._create_action_pill(icon, label, prompt)
+        for icon, badge_bg, label, prompt in pills_data:
+            pill_btn = self._create_action_pill(icon, badge_bg, label, prompt)
             pills_layout.addWidget(pill_btn)
 
         center_layout.addLayout(pills_layout)
@@ -495,27 +534,27 @@ class MainWindow(QMainWindow):
 
         center_layout.addStretch(1)
 
-        # B5. Large Rounded AI Input Bar
+        # B5. Large Rounded AI Input Bar (Matching Image 2)
         self.input_container = QFrame()
         self.input_container.setObjectName("InputContainer")
-        self.input_container.setStyleSheet(f"""
-            QFrame#InputContainer {{
-                background-color: rgba(15, 23, 42, 0.85);
-                border: 1px solid rgba(56, 189, 248, 0.35);
+        self.input_container.setStyleSheet("""
+            QFrame#InputContainer {
+                background-color: rgba(10, 18, 38, 0.8);
+                border: 1px solid rgba(0, 210, 255, 0.35);
                 border-radius: 26px;
                 padding: 4px 10px;
-            }}
-            QFrame#InputContainer:focus-within {{
-                border: 1px solid {PRIMARY_CYAN};
-            }}
+            }
+            QFrame#InputContainer:focus-within {
+                border: 1px solid #00E5FF;
+            }
         """)
         input_row = QHBoxLayout(self.input_container)
-        input_row.setContentsMargins(10, 4, 6, 4)
+        input_row.setContentsMargins(12, 4, 8, 4)
         input_row.setSpacing(10)
 
-        # Sparkle icon
-        sparkle = QLabel("✨")
-        sparkle.setStyleSheet(f"color: {PRIMARY_CYAN}; font-size: 14px;")
+        # 4-pointed sparkle star icon
+        sparkle = QLabel("✦")
+        sparkle.setStyleSheet("color: #00E5FF; font-size: 16px;")
         input_row.addWidget(sparkle)
 
         # Line Edit
@@ -547,14 +586,13 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
             }}
             QPushButton:hover {{
-                color: {PRIMARY_CYAN};
-                background: rgba(255, 255, 255, 0.08);
+                color: #00E5FF;
             }}
         """)
         input_row.addWidget(attach_btn)
 
         # Mic button
-        self.mic_btn = QPushButton("🎙️")
+        self.mic_btn = QPushButton("🎙")
         self.mic_btn.setToolTip("Voice Input")
         self.mic_btn.setFixedSize(28, 28)
         self.mic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -567,29 +605,28 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
             }}
             QPushButton:hover {{
-                color: {PRIMARY_CYAN};
-                background: rgba(255, 255, 255, 0.08);
+                color: #00E5FF;
             }}
         """)
         self.mic_btn.clicked.connect(self._toggle_voice_listen)
         input_row.addWidget(self.mic_btn)
 
-        # Circular Send Button
-        self.send_btn = QPushButton("➔")
+        # Circular Send Button with gradient
+        self.send_btn = QPushButton("▲")
         self.send_btn.setToolTip("Send command")
         self.send_btn.setFixedSize(36, 36)
         self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.setStyleSheet("""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #38BDF8, stop:1 #8B5CF6);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00D2FF, stop:1 #8B5CF6);
                 border: none;
                 border-radius: 18px;
                 color: #FFFFFF;
-                font-size: 15px;
+                font-size: 13px;
                 font-weight: 800;
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #06B6D4, stop:1 #7C3AED);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00B4D8, stop:1 #7C3AED);
             }}
         """)
         self.send_btn.clicked.connect(self._submit_input)
@@ -614,31 +651,48 @@ class MainWindow(QMainWindow):
         self.bottom_bar = DenverBottomStatusBar(self)
         root_layout.addWidget(self.bottom_bar)
 
-    def _create_action_pill(self, icon: str, title: str, prompt: str) -> QPushButton:
-        """Create a rounded translucent suggestion action pill."""
-        btn = QPushButton(f"{icon}  {title}")
+    def _create_action_pill(self, icon: str, badge_bg: str, title: str, prompt: str) -> QWidget:
+        """Create a rounded translucent suggestion action pill matching Image 2."""
+        btn = QPushButton()
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: rgba(15, 23, 42, 0.75);
-                border: 1px solid rgba(56, 189, 248, 0.25);
-                border-radius: 18px;
-                padding: 7px 16px;
-                color: {TEXT_PRIMARY};
-                font-size: 11px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background-color: rgba(56, 189, 248, 0.15);
-                border: 1px solid {PRIMARY_CYAN};
-                color: #FFFFFF;
-            }}
-            QPushButton:pressed {{
-                background-color: rgba(56, 189, 248, 0.25);
-            }}
+        btn.setFixedHeight(44)
+        btn.setMinimumWidth(152)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(10, 18, 38, 0.75);
+                border: 1px solid rgba(0, 210, 255, 0.22);
+                border-radius: 22px;
+                padding: 4px 14px 4px 6px;
+            }
+            QPushButton:hover {
+                background-color: rgba(18, 32, 64, 0.85);
+                border: 1px solid #00E5FF;
+            }
         """)
+        btn_layout = QHBoxLayout(btn)
+        btn_layout.setContentsMargins(6, 4, 12, 4)
+        btn_layout.setSpacing(8)
+
+        # Colored icon badge on the left
+        icon_badge = QLabel(icon)
+        icon_badge.setFixedSize(30, 30)
+        icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        icon_badge.setStyleSheet(f"""
+            background-color: {badge_bg};
+            border-radius: 9px;
+            font-size: 13px;
+        """)
+        btn_layout.addWidget(icon_badge)
+
+        text_lbl = QLabel(title)
+        text_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        text_lbl.setStyleSheet("color: #FFFFFF; font-size: 12px; font-weight: 600;")
+        btn_layout.addWidget(text_lbl)
+
         btn.clicked.connect(lambda: self._on_action_pill_clicked(prompt))
         return btn
+
 
     def _on_action_pill_clicked(self, prompt: str) -> None:
         self.input_edit.setText(prompt)
