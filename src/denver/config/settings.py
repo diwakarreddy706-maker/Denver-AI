@@ -103,7 +103,7 @@ class DenverSettings:
     gemini_enabled: bool = True
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-flash-latest"
 
     # Spotify Integration
     spotify_enabled: bool = False
@@ -257,7 +257,7 @@ class DenverSettings:
             gemini_enabled=_parse_bool(source.get("DENVER_GEMINI_ENABLED"), True),
             gemini_base_url=source.get("DENVER_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
             gemini_api_key=source.get("DENVER_GEMINI_API_KEY", source.get("GEMINI_API_KEY", "")),
-            gemini_model=source.get("DENVER_GEMINI_MODEL", "gemini-1.5-flash"),
+            gemini_model=source.get("DENVER_GEMINI_MODEL", "gemini-flash-latest"),
             spotify_enabled=_parse_bool(source.get("DENVER_SPOTIFY_ENABLED", source.get("JARVIS_ENABLE_SPOTIFY")), False),
             spotify_client_id=source.get("SPOTIFY_CLIENT_ID", source.get("DENVER_SPOTIFY_CLIENT_ID", "")),
             spotify_client_secret=source.get("SPOTIFY_CLIENT_SECRET", source.get("DENVER_SPOTIFY_CLIENT_SECRET", "")),

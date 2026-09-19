@@ -117,8 +117,12 @@ class ProviderRouter:
         logger.info("Active LLM provider set to '%s'. Priority order: %s", clean_name, self.priority_order)
         return True
 
-    def get_ordered_providers(self, complexity: TaskComplexity = TaskComplexity.LOW) -> list[AIProvider]:
-        """Resolve ordered list of providers based on priority configuration, air-gapped constraints, and complexity."""
+    def get_ordered_providers(
+        self,
+        complexity: TaskComplexity = TaskComplexity.LOW,
+        has_images: bool = False,
+    ) -> list[AIProvider]:
+        """Resolve ordered list of providers based on priority configuration, air-gapped constraints, complexity, and vision capabilities."""
         ordered = []
         for name in self.priority_order:
             provider = self.registry.get(name)
@@ -133,6 +137,12 @@ class ProviderRouter:
                 if self.air_gapped_mode and provider.provider_type == ProviderType.CLOUD:
                     continue
                 ordered.append(provider)
+
+        if has_images:
+            # Re-order so providers that natively handle multimodal vision (e.g. Gemini) are prioritized first
+            vision_capable = [p for p in ordered if p.name in {"gemini"}]
+            others = [p for p in ordered if p.name not in {"gemini"}]
+            ordered = vision_capable + others
 
         return ordered
 
@@ -150,7 +160,8 @@ class ProviderRouter:
         )
         logger.debug("Task complexity classified as: %s", complexity.value)
 
-        providers = self.get_ordered_providers(complexity=complexity)
+        has_images = bool(request.images)
+        providers = self.get_ordered_providers(complexity=complexity, has_images=has_images)
         if not providers:
             err_msg = (
                 "No AI provider is currently available (Air-Gapped mode active; cloud providers blocked)."
@@ -172,7 +183,7 @@ class ProviderRouter:
                 if self.air_gapped_mode:
                     logger.debug("Skipping cloud provider '%s': air-gapped mode is active.", provider.name)
                     continue
-                if not self.cloud_fallback_enabled and self.active_provider != provider.name:
+                if not self.cloud_fallback_enabled and self.active_provider != provider.name and not (has_images and provider.name in {"gemini", "groq"}):
                     logger.debug("Skipping cloud provider '%s': cloud fallback is disabled.", provider.name)
                     continue
 

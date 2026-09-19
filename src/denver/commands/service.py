@@ -1334,8 +1334,29 @@ class CommandEngineService:
     async def _handle_create_reminder(self, params: dict[str, Any]) -> ActionResult:
         if not self.routine_registry:
             return ActionResult(success=False, message="Routine registry is not configured.", action_name="create_reminder")
-        time_str = params.get("time", "").strip()
-        msg = params.get("message", "").strip()
+        raw_time = params.get("time", "").strip()
+        msg = params.get("message", "").strip() or "Reminder"
+
+        import re
+        hh_mm = ""
+        m_24 = re.search(r"\b([01]?[0-9]|2[0-3]):([0-5][0-9])\b", raw_time)
+        if m_24:
+            hh_mm = f"{int(m_24.group(1)):02d}:{m_24.group(2)}"
+        else:
+            m_12 = re.search(r"\b(\d{1,2})(?::([0-5][0-9]))?\s*(am|pm)\b", raw_time, re.IGNORECASE)
+            if m_12:
+                hr = int(m_12.group(1))
+                mn = m_12.group(2) or "00"
+                meridiem = m_12.group(3).lower()
+                if meridiem == "pm" and hr < 12:
+                    hr += 12
+                elif meridiem == "am" and hr == 12:
+                    hr = 0
+                hh_mm = f"{hr:02d}:{mn}"
+            else:
+                hh_mm = "09:00"
+
+        time_str = hh_mm
         from denver.scheduler.models import RoutineAction, RoutineTrigger, TriggerType
         trigger = RoutineTrigger(
             trigger_type=TriggerType.DAILY,

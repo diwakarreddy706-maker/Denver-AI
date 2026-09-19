@@ -35,9 +35,9 @@ class GeminiProvider(AIProvider):
         self,
         vault: DenverVault | None = None,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta",
-        default_model: str = "gemini-1.5-flash",
+        default_model: str = "gemini-flash-latest",
         enabled: bool = True,
-        timeout_seconds: float = 10.0,
+        timeout_seconds: float = 30.0,
     ) -> None:
         self.vault = vault or get_vault()
         self.base_url = base_url.rstrip("/")
