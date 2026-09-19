@@ -69,6 +69,9 @@ def test_command_input_widget(qapp):
 
 def test_activity_panel_widget(qapp):
     panel = ActivityPanelWidget()
+    assert panel.tabs.count() == 5
+    assert "HOME" in panel.tabs.tabText(0)
+    assert panel.tabs.currentIndex() == 0
     assert panel.empty_state.isHidden() is False
 
     item = ActivityItem(
@@ -79,8 +82,9 @@ def test_activity_panel_widget(qapp):
         success=True,
     )
     panel.add_item(item)
-    # Empty state hidden after item arrival
+    # Empty state hidden after item arrival and switched to stream tab
     assert panel.empty_state.isHidden() is True
+    assert panel.tabs.currentWidget() == panel.stream_tab
     assert panel.list_layout.count() >= 2
 
 

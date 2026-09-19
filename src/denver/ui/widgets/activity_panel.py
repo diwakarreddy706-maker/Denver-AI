@@ -194,8 +194,9 @@ class EmptyStateWidget(QWidget):
 class ActivityPanelWidget(QWidget):
     """Multi-Tab Command Center housing Live Chat Stream, Tasks Orchestration, and Proactive Routines."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, controller: Any | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.controller = controller
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -203,6 +204,7 @@ class ActivityPanelWidget(QWidget):
             return
 
         from PySide6.QtWidgets import QTabWidget
+        from denver.ui.widgets.home_dashboard import DenverHomeTabWidget
         from denver.ui.widgets.routines_widget import ScheduledRoutinesWidget
         from denver.ui.widgets.tasks_widget import TasksOrchestrationWidget
 
@@ -213,6 +215,10 @@ class ActivityPanelWidget(QWidget):
         # Tabbed Command Center
         self.tabs = QTabWidget()
         self.tabs.setObjectName("ActivityTabs")
+
+        # ─── TAB 0: Home Dashboard (Cyber HUD Overlay Content) ───────
+        self.home_tab = DenverHomeTabWidget(controller=self.controller)
+        self.tabs.addTab(self.home_tab, "🏠 HOME")
 
         # ─── TAB 1: Live Chat & Activity Stream ───────────────────────
         self.stream_tab = QWidget()
@@ -256,6 +262,9 @@ class ActivityPanelWidget(QWidget):
         self.plugins_widget = PluginsWidget()
         self.tabs.addTab(self.plugins_widget, "🧩 PLUGINS")
 
+        # Default to HOME tab (index 0)
+        self.tabs.setCurrentIndex(0)
+
         main_layout.addWidget(self.tabs, stretch=1)
 
     def add_item(self, item: ActivityItem) -> None:
@@ -268,8 +277,8 @@ class ActivityPanelWidget(QWidget):
             self.empty_state.hide()
 
         # Switch to chat tab when new activity arrives
-        if hasattr(self, "tabs"):
-            self.tabs.setCurrentIndex(0)
+        if hasattr(self, "tabs") and hasattr(self, "stream_tab"):
+            self.tabs.setCurrentWidget(self.stream_tab)
 
         card = ActivityItemCard(item, self.container)
         count = self.list_layout.count()

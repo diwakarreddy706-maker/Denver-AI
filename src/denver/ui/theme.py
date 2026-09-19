@@ -31,6 +31,19 @@ TEXT_SECONDARY = "#94A3B8"
 TEXT_MUTED = "#64748B"
 TEXT_CYAN = "#38BDF8"
 
+# Dashboard & Cyber Card Tokens (Glassmorphic HUD Design System)
+BG_OVERLAY_GRADIENT = "qradialgradient(cx: 0.5, cy: 0.45, radius: 0.85, fx: 0.5, fy: 0.45, stop: 0 #0c1833, stop: 0.5 #080e1e, stop: 1 #04070e)"
+CARD_BG = "rgba(13, 20, 36, 0.78)"
+CARD_BG_GRADIENT = "qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 rgba(18, 28, 52, 0.85), stop: 1 rgba(10, 16, 30, 0.90))"
+CARD_BG_HOVER = "qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 rgba(22, 36, 66, 0.90), stop: 1 rgba(12, 20, 38, 0.94))"
+CARD_BORDER = "rgba(56, 189, 248, 0.18)"
+CARD_BORDER_HOVER = "rgba(6, 182, 212, 0.75)"
+CARD_GLOW_COLOR = "rgba(6, 182, 212, 0.30)"
+GRADIENT_TEAL = "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #06b6d4, stop: 1 #0284c7)"
+GRADIENT_BLUE = "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #3b82f6, stop: 1 #1d4ed8)"
+BOTTOM_BAR_BG = "rgba(8, 12, 22, 0.96)"
+BOTTOM_BAR_BORDER = "rgba(30, 41, 59, 0.9)"
+
 # ============================================================================
 # Cyber-Command-Center QSS Stylesheet
 # ============================================================================

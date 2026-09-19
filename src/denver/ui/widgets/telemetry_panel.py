@@ -43,6 +43,7 @@ class TelemetryCard(QFrame):
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("TelemetryCard")
+        self.setMinimumHeight(84)
         self.setStyleSheet(f"""
             QFrame#TelemetryCard {{
                 background-color: {BG_PANEL};
@@ -58,8 +59,8 @@ class TelemetryCard(QFrame):
 
     def _init_ui(self, title: str) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(3)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
 
         # Top row: Metric Title + Unit tag
         top_row = QHBoxLayout()
@@ -73,7 +74,8 @@ class TelemetryCard(QFrame):
 
         # Middle row: Large prominent numerical value
         self.value_lbl = QLabel("N/A")
-        self.value_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 17px; font-weight: 800; letter-spacing: 0.5px;")
+        self.value_lbl.setMinimumHeight(24)
+        self.value_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: 800; letter-spacing: 0.5px; padding: 0px;")
         layout.addWidget(self.value_lbl)
 
         # Progress bar indicator

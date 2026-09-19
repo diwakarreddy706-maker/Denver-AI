@@ -7,6 +7,18 @@ from denver.ui.widgets.automation_status import AutomationBadge, AutomationStatu
 from denver.ui.widgets.command_input import CommandInputWidget
 from denver.ui.widgets.confirmation_dialog import SecurityConfirmationDialog
 from denver.ui.widgets.core_visualizer import DenverCoreVisualizer
+from denver.ui.widgets.home_dashboard import (
+    AIStatusCard,
+    BottomBarWidget,
+    DenverDashboardOverlay,
+    DenverHomeTabWidget,
+    LiveClockCard,
+    QuickActionsCard,
+    QuickStatusCard,
+    SpotifyMediaCard,
+    SystemPerformanceCard,
+    WeatherCard,
+)
 from denver.ui.widgets.memory_status import MemoryStatusWidget
 from denver.ui.widgets.plugins_widget import PluginCardWidget, PluginsWidget
 from denver.ui.widgets.provider_status import ProviderRow, ProviderStatusWidget
@@ -17,22 +29,32 @@ from denver.ui.widgets.telemetry_panel import TelemetryCard, TelemetryPanelWidge
 from denver.ui.widgets.voice_status import VoiceStatusWidget
 
 __all__ = [
+    "AIStatusCard",
     "ActivityItemCard",
     "ActivityPanelWidget",
     "AutomationBadge",
     "AutomationStatusWidget",
+    "BottomBarWidget",
     "CommandInputWidget",
     "DenverCoreVisualizer",
+    "DenverDashboardOverlay",
+    "DenverHomeTabWidget",
+    "LiveClockCard",
     "MemoryStatusWidget",
     "PluginCardWidget",
     "PluginsWidget",
     "ProviderRow",
     "ProviderStatusWidget",
+    "QuickActionsCard",
+    "QuickStatusCard",
     "ScheduledRoutinesWidget",
     "SecurityConfirmationDialog",
     "SettingsDialog",
+    "SpotifyMediaCard",
+    "SystemPerformanceCard",
     "TasksOrchestrationWidget",
     "TelemetryCard",
     "TelemetryPanelWidget",
     "VoiceStatusWidget",
+    "WeatherCard",
 ]
