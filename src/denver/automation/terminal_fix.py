@@ -21,12 +21,12 @@ from denver.logging.logger import get_logger
 
 logger = get_logger("automation.terminal_fix")
 
-# Whitelist of recognized development, build, and package management binaries
+# Whitelist of recognized development, build, and package management binaries strictly permitted for fixes
 ALLOWED_FIX_BINARIES = {
     "pip", "pip3", "python", "python3", "py",
     "npm", "npx", "pnpm", "yarn",
     "cargo", "rustc", "rustup",
-    "git", "docker", "dotnet", "go",
+    "git", "dotnet", "go",
     "composer", "poetry", "uv",
     "pytest", "ruff", "flake8", "black", "mypy",
     "node", "deno", "bun", "tsc",
@@ -44,10 +44,44 @@ DESTRUCTIVE_COMMAND_PATTERNS = [
     re.compile(r"\b(chmod\s+-R\s+777|sudo\s+rm)\b", re.IGNORECASE),
     re.compile(r"\b(curl|wget)\s+.*\|\s*(?:bash|sh|cmd|powershell)\b", re.IGNORECASE),
     re.compile(r">\s*(?:/dev/sd[a-z]|\\\\.\\[a-zA-Z]:)", re.IGNORECASE),
+    # PowerShell destructive cmdlets and administrative manipulation
+    re.compile(
+        r"\b(remove-item|clear-content|set-content|invoke-expression|invoke-command|start-process|"
+        r"stop-process|stop-computer|restart-computer|set-executionpolicy|new-object|add-type|"
+        r"disable-windowsoptionalfeature|ri|iex|icm|saps|kill|clc)\b",
+        re.IGNORECASE,
+    ),
+    # Obfuscated or base64 encoded PowerShell flags
+    re.compile(r"-(?:e|enc|encodedcommand)\b", re.IGNORECASE),
 ]
 
-# Prohibited unquoted command chaining or shell redirect operators
-SHELL_INJECTION_CHARS = [";", "&&", "||", "|", "&", ">", "<", "`", "$("]
+# Prohibited command chaining, redirection, obfuscation, or subshell characters
+SHELL_INJECTION_CHARS = [
+    "\n", "\r", ";", "&&", "||", "|", "&", ">", "<", "`", "$(", "${", "^"
+]
+
+# Environment variable indirection patterns (%COMSPEC%, $env:COMSPEC, $VAR)
+ENV_INDIRECTION_PATTERN = re.compile(r"(%[a-zA-Z0-9_]+%|\$env:[a-zA-Z0-9_]+|\$[a-zA-Z0-9_]+)", re.IGNORECASE)
+
+# Mandatory indicators of a genuine terminal or compiler error
+GENUINE_ERROR_INDICATORS = [
+    "modulenotfounderror",
+    "importerror",
+    "command not found",
+    "not recognized as an internal or external command",
+    "cannot find module",
+    "fatal error:",
+    "compilation error",
+    "syntaxerror",
+    "failed to compile",
+    "package not found",
+    "could not find a version that satisfies the requirement",
+    "no matching distribution found",
+    "error: failed to run custom build command",
+    "error: could not compile",
+    "npm err!",
+    "traceback (most recent call last)",
+]
 
 
 class TerminalFixController:
@@ -56,9 +90,33 @@ class TerminalFixController:
     def __init__(self, safety_validator: SafetyValidator | None = None) -> None:
         self.safety = safety_validator or SafetyValidator(allow_destructive_actions=False)
 
-    def extract_fix_proposal(self, analysis_text: str) -> dict[str, Any] | None:
-        """Extract root cause and proposed fix command from multimodal vision analysis text."""
+    def extract_fix_proposal(
+        self,
+        analysis_text: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Extract root cause and proposed fix command from multimodal vision analysis text.
+        
+        Requires genuine error verification to mitigate prompt injection from arbitrary webpages.
+        """
         if not analysis_text or not analysis_text.strip():
+            return None
+
+        # Threat Model Mitigation: Block extraction if context metadata flags untrusted source
+        if context_metadata:
+            if context_metadata.get("is_untrusted", False):
+                logger.warning("Fix proposal extraction rejected: context is marked untrusted.")
+                return None
+            source_app = str(context_metadata.get("source_app", "")).lower()
+            if any(browser in source_app for browser in ["chrome", "msedge", "firefox", "brave", "opera", "safari"]):
+                logger.warning("Fix proposal extraction rejected: active window is an untrusted browser context.")
+                return None
+
+        # Verify genuine error indicators in analysis text
+        lower_analysis = analysis_text.lower()
+        has_genuine_error = any(ind in lower_analysis for ind in GENUINE_ERROR_INDICATORS)
+        if not has_genuine_error:
+            logger.info("Fix proposal extraction bypassed: text does not contain genuine terminal/compiler error signatures.")
             return None
 
         # 1. Search for explicit fix command code blocks: ```fix_command ... ``` or ```bash ... ``` or `command`
@@ -108,30 +166,39 @@ class TerminalFixController:
 
         cmd_clean = command.strip()
 
-        # 1. Reject command chaining / pipeline / redirection operators
+        # 1. Reject command chaining / pipeline / redirection / obfuscation operators
         for char in SHELL_INJECTION_CHARS:
             if char in cmd_clean:
+                display_char = "\\n" if char == "\n" else ("\\r" if char == "\r" else char)
                 return (
                     False,
-                    f"Prohibited shell chaining or redirection operator '{char}' detected. Compound commands are not allowed.",
+                    f"Prohibited shell chaining, redirection, or obfuscation character '{display_char}' detected. Compound commands are not allowed.",
                     None,
                 )
 
-        # 2. Check for destructive command patterns
+        # 2. Reject environment variable indirection (%VAR%, $env:VAR, $VAR)
+        if ENV_INDIRECTION_PATTERN.search(cmd_clean):
+            return (
+                False,
+                "Command blocked: Environment variable indirection is prohibited in terminal fix commands.",
+                None,
+            )
+
+        # 3. Check for destructive command patterns & dangerous PowerShell cmdlets
         for pattern in DESTRUCTIVE_COMMAND_PATTERNS:
             if pattern.search(cmd_clean):
                 return (
                     False,
-                    f"Command blocked: Destructive command pattern '{pattern.pattern}' is prohibited.",
+                    f"Command blocked: Destructive or prohibited command pattern '{pattern.pattern}' detected.",
                     None,
                 )
 
-        # 3. Check Denver SafetyValidator baseline
+        # 4. Check Denver SafetyValidator baseline
         safety_violation = self.safety.check_for_dangerous_patterns(cmd_clean)
         if safety_violation:
             return False, f"Command safety violation: {safety_violation}", None
 
-        # 4. Safe Tokenization (shell=False enforcement)
+        # 5. Safe Tokenization (shell=False enforcement)
         try:
             # Use posix=False on Windows to preserve Windows quoting rules
             use_posix = os.name != "nt"
@@ -142,16 +209,21 @@ class TerminalFixController:
         if not args:
             return False, "Tokenized arguments array is empty.", None
 
-        base_bin = Path(args[0]).name.lower()
+        raw_bin = args[0].strip("\"'")
+        base_bin = Path(raw_bin).name.lower()
         if base_bin.endswith(".exe"):
             base_bin = base_bin[:-4]
 
-        # 5. Verify base binary against allowed developer tools or verify it is safe
+        # 6. Verify base binary against strictly allowed developer package/build tools
         if base_bin in {"cmd", "powershell", "pwsh", "bash", "sh", "zsh", "wscript", "cscript"}:
             return False, f"Direct invocation of raw shell binary '{base_bin}' is prohibited.", None
 
         if base_bin not in ALLOWED_FIX_BINARIES:
-            logger.info("Command binary '%s' is not in standard package tool whitelist, checking safety baseline.", base_bin)
+            return (
+                False,
+                f"Binary '{base_bin}' is not permitted for autonomous terminal fix execution. Only approved development and package manager binaries ({', '.join(sorted(ALLOWED_FIX_BINARIES))}) are allowed.",
+                None,
+            )
 
         return True, None, args
 

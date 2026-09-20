@@ -168,6 +168,7 @@ class DenverSettings:
     screenshot_directory: Path = Path("data/screenshots")
     screen_awareness_hotkey_enabled: bool = True
     screen_awareness_hotkey: str = "ctrl+alt+s"
+    enable_autonomous_terminal_fix: bool = False
     screen_cloud_disclosure_acknowledged: bool = False
     allow_destructive_actions: bool = False
     action_sequence_delay: float = 0.1

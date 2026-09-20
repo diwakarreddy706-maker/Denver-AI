@@ -970,13 +970,26 @@ class IntentRouter:
         # 7. Confirmation Checks
         m = self._confirm_re.match(text)
         if m:
-            token = m.group(1) if m.groups() and m.group(1) else ""
+            matched_lower = m.group(0).lower()
+            token = m.group(1).strip() if (m.groups() and m.group(1)) else ""
+            action_scope = ""
+            if "fix" in matched_lower:
+                action_scope = "execute_terminal_fix"
+            elif "lock" in matched_lower:
+                action_scope = "lock_workstation"
+
+            p: dict[str, Any] = {}
+            if token:
+                p["token"] = token
+            if action_scope:
+                p["action_scope"] = action_scope
+
             return CommandIntent(
                 intent_name="confirm_action",
                 action_name="confirm_action",
                 category=CommandCategory.UTILITY,
                 confidence=1.0,
-                params={"token": token},
+                params=p,
                 risk_level=CommandRiskLevel.SAFE,
             )
 
@@ -1454,28 +1467,6 @@ class IntentRouter:
                 requires_confirmation=False,
             )
 
-        # 11a. Privileged Action Confirmation & Cancellation
-        m = self._confirm_re.match(text)
-        if m:
-            token = m.group(1).strip() if (m.groups() and m.group(1)) else ""
-            return CommandIntent(
-                intent_name="confirm_action",
-                action_name="confirm_action",
-                category=CommandCategory.UTILITY,
-                confidence=1.0,
-                params={"token": token} if token else {},
-                risk_level=CommandRiskLevel.SAFE,
-            )
-
-        if self._cancel_re.match(text):
-            return CommandIntent(
-                intent_name="cancel_action",
-                action_name="cancel_action",
-                category=CommandCategory.UTILITY,
-                confidence=1.0,
-                params={},
-                risk_level=CommandRiskLevel.SAFE,
-            )
 
         # 11b. Autonomous Terminal Fix Execution
         m = self._terminal_fix_re.match(text)

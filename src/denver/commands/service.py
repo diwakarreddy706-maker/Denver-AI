@@ -1969,9 +1969,10 @@ class CommandEngineService:
             data = vision_res.to_dict()
             msg = vision_res.text
 
-            # Component 4: If error diagnosis mode, automatically extract proposed fix and stage confirmation
+            # Component 4: If enabled and error diagnosis mode, automatically extract proposed fix and stage confirmation
+            term_fix_enabled = getattr(self.settings, "enable_autonomous_terminal_fix", False)
             term_fix_ctrl = getattr(self.automation, "terminal_fix", None)
-            if term_fix_ctrl:
+            if term_fix_enabled and term_fix_ctrl:
                 fix_proposal = term_fix_ctrl.extract_fix_proposal(vision_res.text)
                 if fix_proposal and fix_proposal.get("command"):
                     fix_cmd = fix_proposal["command"]
@@ -1996,7 +1997,7 @@ class CommandEngineService:
                                 prompt_message=f"Execute terminal fix: `{fix_cmd}`?",
                             )
                         )
-                        msg += f"\n\n⚡ Proposed Terminal Fix: `{fix_cmd}`\nSay 'Yes, do it' or confirm in Cockpit to execute."
+                        msg += f"\n\n⚡ Proposed Terminal Fix: `{fix_cmd}`\nSay 'confirm fix' or confirm in Cockpit to execute."
 
             return ActionResult(
                 success=True,
@@ -2014,6 +2015,14 @@ class CommandEngineService:
             )
 
     async def _handle_execute_terminal_fix(self, params: dict[str, Any]) -> ActionResult:
+        if not getattr(self.settings, "enable_autonomous_terminal_fix", False):
+            return ActionResult(
+                success=False,
+                message="Autonomous terminal fix execution is currently disabled in Denver settings. Enable 'enable_autonomous_terminal_fix' to use this feature.",
+                action_name="execute_terminal_fix",
+                error="FeatureDisabled",
+            )
+
         cmd = params.get("command", "") or params.get("target", "")
         # If no explicit command is provided, check recent screen context
         if not cmd:
@@ -2441,10 +2450,42 @@ class CommandEngineService:
 
     async def _handle_confirm_action(self, params: dict[str, Any]) -> ActionResult:
         token = params.get("token")
+        action_scope = params.get("action_scope")
         pending = None
+
         if token:
             pending = self.automation.confirmation.get_pending(token)
+            if not pending:
+                return ActionResult(
+                    success=False,
+                    message=f"Confirmation token '{token}' is invalid, expired, or already used.",
+                    action_name="confirm_action",
+                    error="TokenInvalid",
+                )
+        elif action_scope:
+            pending = self.automation.confirmation.get_latest_pending(action_name=action_scope)
+            if not pending:
+                return ActionResult(
+                    success=False,
+                    message=f"No pending confirmation found for action '{action_scope}'.",
+                    action_name="confirm_action",
+                    error="ActionNotFound",
+                )
         else:
+            # Bare "yes" / "proceed" / "confirm"
+            self.automation.confirmation.clear_expired()
+            active_pending = [
+                req for req in self.automation.confirmation._pending.values()
+                if not req.is_expired and not req.is_consumed
+            ]
+            if len(active_pending) > 1:
+                actions_list = ", ".join(sorted(set(r.action_name for r in active_pending)))
+                return ActionResult(
+                    success=False,
+                    message=f"Ambiguous confirmation: multiple actions are pending ({actions_list}). Please specify which action to confirm (e.g. 'confirm fix', 'confirm lock', or supply the token).",
+                    action_name="confirm_action",
+                    error="AmbiguousConfirmation",
+                )
             pending = self.automation.confirmation.get_latest_pending()
 
         if not pending:
@@ -2453,6 +2494,15 @@ class CommandEngineService:
                 message="There are no pending actions requiring confirmation.",
                 action_name="confirm_action",
             )
+
+        if pending.action_name == "execute_terminal_fix":
+            if not getattr(self.settings, "enable_autonomous_terminal_fix", False):
+                return ActionResult(
+                    success=False,
+                    message="Autonomous terminal fix execution is currently disabled in Denver settings.",
+                    action_name="execute_terminal_fix",
+                    error="FeatureDisabled",
+                )
 
         if pending.action_name == "save_current_location":
             self.automation.confirmation.validate_and_consume(pending.token)
