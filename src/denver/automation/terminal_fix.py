@@ -3,6 +3,18 @@
 Provides structured error diagnosis extraction, strict security command validation,
 destructive pattern blocking, tokenized shell=False subprocess execution, and
 post-fix visual verification.
+
+RESIDUAL SECURITY RISKS & ARCHITECTURAL LIMITATIONS:
+1. Trust in the foreground-window check is heuristic (excludes known browsers),
+   not a mathematical guarantee — any non-browser app showing attacker-controlled
+   text (e.g. chat clients, document viewers, log viewers) remains a theoretical
+   prompt injection vector if active when screen diagnosis is triggered.
+2. The error-signature allowlist (GENUINE_ERROR_INDICATORS) raises the bar for
+   extraction, but a sufficiently targeted fake error message containing real
+   signature strings (e.g. "ModuleNotFoundError: No module named 'x'") could still
+   pass the extraction filter. Strict command validation and single-use user
+   confirmation gates are the primary defenses preventing execution.
+3. Feature is disabled by default via DenverSettings.enable_autonomous_terminal_fix.
 """
 
 from __future__ import annotations

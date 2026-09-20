@@ -398,7 +398,11 @@
   - [x] **Component 1 - Interactive Screen Awareness HUD & Global Hotkey**: Camera lens icon on Cockpit AI bar, `Ctrl+Alt+S` global hotkey, mandatory cloud disclosure modal, in-memory per-session consent, and toast HUD notifications.
   - [x] **Component 2 - Native Win32 GDI Screen Capture Fallback**: Low-level `ctypes.windll.user32` and `gdi32` BitBlt bitmap capture engine for high-DPI and background window reliability.
   - [x] **Component 3 - Continuous Multi-Turn Vision Context**: Rolling visual context cache retained in `ContextEngine`, enabling multi-turn follow-up queries without re-capturing.
-  - [x] **Component 4 - Autonomous Terminal Fix Execution with Confirmation Gates**: Automated extraction of terminal fix commands from diagnosis text, strict safety validation (tokenization, destructive command blocking, unquoted operator blocking, `shell=False` execution), high-risk confirmation token staging, and voice confirmation (*"Yes, do it"*, *"confirm fix"*).
+  - [x] **Component 4 - Autonomous Terminal Fix Execution (Implemented, Disabled-by-Default, Documented Residual Risk)**:
+    - *Status*: Disabled by default (`enable_autonomous_terminal_fix = False`). Must remain explicitly disabled unless specifically turned on by user.
+    - *Residual Risk 1*: Trust in foreground-window check is heuristic (excludes known browsers), not a guarantee — any non-browser application displaying attacker-controlled text is a theoretical prompt injection vector.
+    - *Residual Risk 2*: The error-signature allowlist raises the bar, but a sufficiently targeted fake error message containing real signature strings (e.g. `ModuleNotFoundError`) could still pass the extraction filter. Strict command validation and the single-use token confirmation gate are the primary defenses preventing execution.
+    - *Security Gates*: Tokenized `shell=False` execution, strict binary allowlist, destructive pattern blocking, and scoped confirmation tokens.
 
 ---
 
