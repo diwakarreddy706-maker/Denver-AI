@@ -238,8 +238,24 @@ class DenverApplication:
             start_time=self.start_time,
         )
 
+        from denver.automation.hotkey import GlobalHotkeyManager
+        self.hotkey_manager = GlobalHotkeyManager(
+            event_bus=self.event_bus,
+            enabled=getattr(self.settings, "screen_awareness_hotkey_enabled", True),
+        )
 
         self._shutdown_event = asyncio.Event()
+
+    def _handle_screen_awareness_hotkey(self) -> None:
+        """Triggered when screen awareness global hotkey is pressed."""
+        logger.info("Screen Awareness Hotkey activated.")
+        loop = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if loop and loop.is_running():
+            asyncio.create_task(self.process_command("look at my screen and describe what you see and diagnose any errors"))
 
     async def start(self) -> None:
         """Execute Denver startup sequence, initialize database, and transition to STANDBY."""
@@ -276,6 +292,20 @@ class DenverApplication:
                 await self.scheduler.start()
             except Exception as exc:  # pylint: disable=broad-except
                 logger.warning("Could not start scheduler on startup: %s", exc)
+
+        # Start global hotkeys if enabled
+        if getattr(self.settings, "screen_awareness_hotkey_enabled", True):
+            try:
+                self.hotkey_manager.register_hotkey(
+                    name="screen_awareness",
+                    hotkey_str=getattr(self.settings, "screen_awareness_hotkey", "ctrl+alt+s"),
+                    callback=self._handle_screen_awareness_hotkey,
+                    mandatory_audio=True,
+                    mandatory_visual=True,
+                )
+                self.hotkey_manager.start()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Could not start global hotkey manager on startup: %s", exc)
 
         # Transition from BOOTING to STANDBY
         await self.state_machine.transition_to(
@@ -329,6 +359,13 @@ class DenverApplication:
             await self.scheduler.stop()
         except Exception as exc:  # pylint: disable=broad-except
             logger.warning("Error stopping scheduler: %s", exc)
+
+        # Stop global hotkeys safely
+        if hasattr(self, "hotkey_manager") and self.hotkey_manager:
+            try:
+                self.hotkey_manager.stop()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Error stopping global hotkey manager: %s", exc)
 
         # Stop / pause all active tasks
         if hasattr(self, "task_registry") and self.task_registry:

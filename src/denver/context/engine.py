@@ -43,6 +43,7 @@ class ContextEngine:
         is_cloud: bool = False,
         category: str | None = None,
         max_memories: int | None = None,
+        active_screen_context: dict[str, Any] | str | None = None,
     ) -> ContextBundle:
         """Assemble a bounded, privacy-filtered context bundle for AI generation."""
         # 1. Gather short-term conversation turns
@@ -115,6 +116,20 @@ class ContextEngine:
             context_parts.append("- Recent Conversation History:")
             for t in pruned_turns:
                 context_parts.append(f"  {t.role.capitalize()}: \"{t.content}\"")
+
+        if active_screen_context:
+            if isinstance(active_screen_context, dict):
+                focus = active_screen_context.get("focus_mode", "general")
+                text = active_screen_context.get("analysis_text", "")
+                context_parts.append(
+                    f"[ACTIVE SCREEN CONTEXT ({focus.upper()} MODE)]\n"
+                    f"{text}"
+                )
+            elif isinstance(active_screen_context, str) and active_screen_context.strip():
+                context_parts.append(
+                    f"[ACTIVE SCREEN CONTEXT]\n"
+                    f"{active_screen_context.strip()}"
+                )
 
         context_str = "\n\n".join(context_parts)
         reasons = [m.retrieval_reason for m in final_memories]

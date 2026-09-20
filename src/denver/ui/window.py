@@ -591,6 +591,27 @@ class MainWindow(QMainWindow):
         """)
         input_row.addWidget(attach_btn)
 
+        # Camera / Screen Awareness button
+        self.camera_btn = QPushButton("📷")
+        self.camera_btn.setToolTip("Screen Awareness (Ctrl+Alt+S) — Inspect active window or screen")
+        self.camera_btn.setFixedSize(28, 28)
+        self.camera_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.camera_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {TEXT_SECONDARY};
+                border: none;
+                border-radius: 14px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                color: #00E5FF;
+                background-color: rgba(0, 229, 255, 0.12);
+            }}
+        """)
+        self.camera_btn.clicked.connect(self._trigger_screen_awareness)
+        input_row.addWidget(self.camera_btn)
+
         # Mic button
         self.mic_btn = QPushButton("🎙")
         self.mic_btn.setToolTip("Voice Input")
@@ -705,6 +726,13 @@ class MainWindow(QMainWindow):
         self.input_edit.clear()
         if self.controller:
             self.controller.submit_command(text)
+
+    def _trigger_screen_awareness(self) -> None:
+        """Trigger instant multimodal desktop screen inspection."""
+        from denver.automation.hotkey import play_capture_sound
+        play_capture_sound()
+        if self.controller:
+            self.controller.submit_command("Denver, look at my screen and describe what you see and diagnose any errors")
 
     def _toggle_voice_listen(self) -> None:
         if self.controller and hasattr(self.controller, "toggle_voice_listening"):

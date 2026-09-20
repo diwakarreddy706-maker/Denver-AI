@@ -166,6 +166,8 @@ class DenverSettings:
     allow_high_risk_actions: bool = False
     default_browser: str = "default"
     screenshot_directory: Path = Path("data/screenshots")
+    screen_awareness_hotkey_enabled: bool = True
+    screen_awareness_hotkey: str = "ctrl+alt+s"
     allow_destructive_actions: bool = False
     action_sequence_delay: float = 0.1
     app_launch_delay: float = 0.2
@@ -298,6 +300,8 @@ class DenverSettings:
             allow_high_risk_actions=_parse_bool(source.get("DENVER_ALLOW_HIGH_RISK_ACTIONS"), False),
             default_browser=source.get("DENVER_DEFAULT_BROWSER", "default"),
             screenshot_directory=Path(source.get("DENVER_SCREENSHOT_DIRECTORY", "data/screenshots")),
+            screen_awareness_hotkey_enabled=_parse_bool(source.get("DENVER_SCREEN_AWARENESS_HOTKEY_ENABLED"), True),
+            screen_awareness_hotkey=source.get("DENVER_SCREEN_AWARENESS_HOTKEY", "ctrl+alt+s"),
             allow_destructive_actions=_parse_bool(source.get("DENVER_ALLOW_DESTRUCTIVE_ACTIONS"), False),
             action_sequence_delay=_parse_float(source.get("DENVER_ACTION_SEQUENCE_DELAY"), 0.1),
             app_launch_delay=_parse_float(source.get("DENVER_APP_LAUNCH_DELAY"), 0.2),

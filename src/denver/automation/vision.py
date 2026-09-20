@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from denver.automation.models import AutomationResult
-from denver.automation.screenshot import ScreenshotController
+from denver.automation.screenshot import ScreenshotController, grab_desktop_image
 from denver.logging.logger import get_logger
-from denver.providers.models import ProviderRequest, ProviderResponse
+from denver.providers.models import ProviderRequest, ProviderResponse, ProviderType
 from denver.providers.router import ProviderRouter
 
 logger = get_logger("automation.vision")
@@ -64,6 +64,7 @@ class VisionEngine:
         self.screenshot_controller = screenshot_controller or ScreenshotController(output_dir=output_dir)
         self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._last_screen_context: dict[str, Any] | None = None
 
     def capture_screen_base64(
         self,
@@ -75,9 +76,9 @@ class VisionEngine:
             raise RuntimeError("Pillow (PIL) is not installed; screen capture unavailable.")
 
         try:
-            img = ImageGrab.grab()
+            img = grab_desktop_image()
         except Exception as exc:
-            logger.warning("ImageGrab.grab() failed (%s); creating diagnostic frame.", exc)
+            logger.warning("Desktop screen capture failed (%s); creating diagnostic frame.", exc)
             img = Image.new("RGB", (1280, 720), color=(24, 24, 27))
 
         orig_w, orig_h = img.size
@@ -117,6 +118,25 @@ class VisionEngine:
         start = time.perf_counter()
         width = 0
         height = 0
+
+        # Pre-flight Air-Gapped Mode Verification
+        if provider_router and getattr(provider_router, "air_gapped_mode", False):
+            local_providers = [
+                p for p in provider_router.registry.list_providers()
+                if p.enabled and p.provider_type == ProviderType.LOCAL
+            ]
+            if not local_providers:
+                elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+                logger.warning("Screen vision analysis blocked: Air-Gapped mode active and no local provider available.")
+                return VisionAnalysisResult(
+                    success=False,
+                    text="Screen capture transmission blocked: Air-Gapped mode is active and cloud providers cannot receive desktop images.",
+                    screenshot_path=screenshot_path,
+                    width=width,
+                    height=height,
+                    latency_ms=elapsed_ms,
+                    error="AirGappedModeActive",
+                )
 
         # Step 1: Capture screen if not already provided
         if not image_base64:
@@ -190,7 +210,7 @@ class VisionEngine:
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
             if ai_res.success:
-                return VisionAnalysisResult(
+                res = VisionAnalysisResult(
                     success=True,
                     text=ai_res.text,
                     screenshot_path=screenshot_path,
@@ -200,6 +220,16 @@ class VisionEngine:
                     model_used=ai_res.model_name,
                     latency_ms=elapsed_ms,
                 )
+                self._last_screen_context = {
+                    "analysis_text": ai_res.text,
+                    "focus_mode": focus_mode,
+                    "timestamp": time.time(),
+                    "provider_used": ai_res.provider_name,
+                    "model_used": ai_res.model_name,
+                    "dimensions": (width, height),
+                    "screenshot_path": str(screenshot_path) if screenshot_path else None,
+                }
+                return res
             else:
                 return VisionAnalysisResult(
                     success=False,
@@ -224,3 +254,12 @@ class VisionEngine:
                 latency_ms=elapsed_ms,
                 error=str(exc),
             )
+
+    def get_recent_screen_context(self, max_age_seconds: float = 300.0) -> dict[str, Any] | None:
+        """Retrieve recent screen analysis context if within TTL (default 5 minutes)."""
+        if not self._last_screen_context:
+            return None
+        age = time.time() - self._last_screen_context.get("timestamp", 0)
+        if age <= max_age_seconds:
+            return dict(self._last_screen_context)
+        return None

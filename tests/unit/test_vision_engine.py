@@ -14,7 +14,7 @@ from denver.memory.database import DenverDatabase
 from denver.memory.memory_service import MemoryService
 from denver.providers.gemini import GeminiProvider
 from denver.providers.groq import GroqProvider
-from denver.providers.models import ProviderRequest, ProviderResponse
+from denver.providers.models import ProviderRequest, ProviderResponse, ProviderType
 from denver.providers.ollama import OllamaProvider
 from denver.providers.router import ProviderRouter
 from denver.security.vault import DenverVault
@@ -188,3 +188,81 @@ async def test_command_service_analyze_screen(initialized_db):
     assert res.success is True
     assert "Python documentation" in res.message
     assert res.action_name == "analyze_screen"
+
+
+@pytest.mark.asyncio
+async def test_vision_engine_context_caching(tmp_path):
+    engine = VisionEngine(output_dir=tmp_path)
+    mock_router = MagicMock(spec=ProviderRouter)
+    mock_router.air_gapped_mode = False
+    mock_router.generate = AsyncMock(
+        return_value=ProviderResponse(
+            text="Detected terminal error on line 42 of main.py.",
+            provider_name="gemini",
+            model_name="gemini-flash-latest",
+            success=True,
+        )
+    )
+
+    result = await engine.analyze_screen(
+        prompt="Check screen for errors",
+        provider_router=mock_router,
+        focus_mode="error_diagnosis",
+    )
+    assert result.success is True
+
+    # Verify context is stored and retrievable within TTL
+    ctx = engine.get_recent_screen_context(max_age_seconds=300)
+    assert ctx is not None
+    assert ctx["analysis_text"] == "Detected terminal error on line 42 of main.py."
+    assert ctx["focus_mode"] == "error_diagnosis"
+
+    # Verify context expires after TTL
+    expired_ctx = engine.get_recent_screen_context(max_age_seconds=-1)
+    assert expired_ctx is None
+
+
+@pytest.mark.asyncio
+async def test_vision_engine_air_gapped_blocks_cloud(tmp_path):
+    """Confirm that when air-gapped mode is enabled, screen capture does NOT reach cloud providers."""
+    from denver.providers.registry import ProviderRegistry
+
+    engine = VisionEngine(output_dir=tmp_path)
+
+    # Setup ProviderRouter with air_gapped_mode = True and only a cloud provider registered
+    mock_cloud_provider = MagicMock()
+    mock_cloud_provider.name = "gemini"
+    mock_cloud_provider.enabled = True
+    mock_cloud_provider.provider_type = ProviderType.CLOUD
+    mock_cloud_provider.generate = AsyncMock()
+
+    registry = ProviderRegistry()
+    registry.register(mock_cloud_provider)
+
+    router = ProviderRouter(registry=registry, air_gapped_mode=True)
+
+    result = await engine.analyze_screen(
+        prompt="Describe screen",
+        provider_router=router,
+    )
+
+    # Assert analysis was blocked and cloud provider generate was NEVER called
+    assert result.success is False
+    assert "Air-Gapped" in result.text or "blocked" in result.text
+    assert result.error == "AirGappedModeActive"
+    mock_cloud_provider.generate.assert_not_called()
+
+
+def test_win32_gdi_fallback_capture(tmp_path):
+    """Test that grab_desktop_image invokes _grab_win32_gdi when ImageGrab.grab fails."""
+    from PIL import Image
+    from denver.automation.screenshot import grab_desktop_image
+
+    dummy_img = Image.new("RGB", (640, 480), color=(10, 20, 30))
+    with patch("PIL.ImageGrab.grab", side_effect=OSError("screen grab failed")):
+        with patch("denver.automation.screenshot._grab_win32_gdi", return_value=dummy_img) as mock_gdi:
+            with patch("os.name", "nt"):
+                captured = grab_desktop_image()
+                assert captured.size == (640, 480)
+                mock_gdi.assert_called_once()
+

@@ -15,10 +15,83 @@ from denver.logging.logger import get_logger
 logger = get_logger("automation.screenshot")
 
 try:
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab
     _PIL_AVAILABLE = True
 except ImportError:
     _PIL_AVAILABLE = False
+
+
+def _grab_win32_gdi() -> Any:
+    """Capture Windows desktop screen using native Win32 GDI BitBlt via ctypes."""
+    import ctypes
+
+    u32 = ctypes.windll.user32
+    g32 = ctypes.windll.gdi32
+
+    try:
+        u32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+    w = u32.GetSystemMetrics(0)  # SM_CXSCREEN
+    h = u32.GetSystemMetrics(1)  # SM_CYSCREEN
+    if w <= 0 or h <= 0:
+        raise RuntimeError("Invalid display metrics from user32.GetSystemMetrics")
+
+    hdc_screen = u32.GetDC(0)
+    hdc_mem = g32.CreateCompatibleDC(hdc_screen)
+    hbm = g32.CreateCompatibleBitmap(hdc_screen, w, h)
+    g32.SelectObject(hdc_mem, hbm)
+
+    # 0x00CC0020 = SRCCOPY, 0x40000000 = CAPTUREBLT (captures layered/semi-transparent windows)
+    g32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, 0, 0, 0x00CC0020 | 0x40000000)
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", ctypes.c_uint32),
+            ("biWidth", ctypes.c_int32),
+            ("biHeight", ctypes.c_int32),
+            ("biPlanes", ctypes.c_uint16),
+            ("biBitCount", ctypes.c_uint16),
+            ("biCompression", ctypes.c_uint32),
+            ("biSizeImage", ctypes.c_uint32),
+            ("biXPelsPerMeter", ctypes.c_int32),
+            ("biYPelsPerMeter", ctypes.c_int32),
+            ("biClrUsed", ctypes.c_uint32),
+            ("biClrImportant", ctypes.c_uint32),
+        ]
+
+    bmi = BITMAPINFOHEADER()
+    bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi.biWidth = w
+    bmi.biHeight = -h  # top-down DIB
+    bmi.biPlanes = 1
+    bmi.biBitCount = 32
+    bmi.biCompression = 0
+
+    buf = ctypes.create_string_buffer(w * h * 4)
+    g32.GetDIBits(hdc_mem, hbm, 0, h, buf, ctypes.byref(bmi), 0)
+
+    # Clean up GDI handles
+    g32.DeleteObject(hbm)
+    g32.DeleteDC(hdc_mem)
+    u32.ReleaseDC(0, hdc_screen)
+
+    return Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
+
+
+def grab_desktop_image() -> Any:
+    """Capture desktop display with automatic Win32 GDI fallback."""
+    if not _PIL_AVAILABLE:
+        raise RuntimeError("Pillow (PIL) is not installed; screen capture unavailable.")
+
+    try:
+        return ImageGrab.grab()
+    except Exception as exc:
+        if os.name == "nt":
+            logger.debug("ImageGrab.grab() failed (%s); attempting Win32 GDI BitBlt fallback.", exc)
+            return _grab_win32_gdi()
+        raise
 
 
 class ScreenshotController:
@@ -79,7 +152,7 @@ class ScreenshotController:
             )
 
         try:
-            img = ImageGrab.grab()
+            img = grab_desktop_image()
             img.save(target_file, "PNG")
 
             file_size = target_file.stat().st_size

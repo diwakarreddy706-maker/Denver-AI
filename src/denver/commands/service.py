@@ -2735,9 +2735,11 @@ class CommandEngineService:
         # Fetch structured memory context & prepare tool definitions via ContextEngine
         ordered_providers = self.provider_router.get_ordered_providers()
         first_is_cloud = (ordered_providers[0].provider_type.value == "cloud") if ordered_providers else False
+        recent_screen = self.vision_engine.get_recent_screen_context() if hasattr(self, "vision_engine") else None
         context_bundle = await self.context_engine.build_context(
             query=req.raw_text,
             is_cloud=first_is_cloud,
+            active_screen_context=recent_screen,
         )
         tools = self._get_tool_definitions()
 

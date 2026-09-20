@@ -68,3 +68,28 @@ async def test_context_engine_build_context(tmp_path: Path) -> None:
     assert bundle.user_profile.preferred_editor == "Antigravity"
     assert bundle.memories_used_count >= 1
     assert len(bundle.short_term_context) == 2
+
+
+@pytest.mark.asyncio
+async def test_context_engine_active_screen_context(tmp_path: Path) -> None:
+    """Verify that active screen context is correctly formatted into the context string."""
+    db_file = tmp_path / "ctx_screen_test.sqlite3"
+    db = DenverDatabase(db_path=db_file)
+    memory = MemoryService(db=db, semantic_enabled=False)
+
+    engine = ContextEngine(memory_service=memory)
+
+    screen_ctx = {
+        "analysis_text": "Terminal window displays 'ModuleNotFoundError: No module named requests'",
+        "focus_mode": "error_diagnosis",
+        "timestamp": 1234567.89,
+    }
+
+    bundle = await engine.build_context(
+        query="Why did my script fail?",
+        active_screen_context=screen_ctx,
+    )
+
+    assert "[ACTIVE SCREEN CONTEXT (ERROR_DIAGNOSIS MODE)]" in bundle.context_string
+    assert "ModuleNotFoundError: No module named requests" in bundle.context_string
+
