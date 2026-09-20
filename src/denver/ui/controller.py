@@ -52,6 +52,7 @@ class QtEventBridge(QObject):
         confirmation_cleared = Signal()
         plugins_updated = Signal(list)
         repair_completed = Signal(int, int, str)
+        screen_capture_triggered = Signal(str, str)
 
 
 class UIController:
@@ -119,11 +120,22 @@ class UIController:
             if self.bridge and hasattr(self.bridge, "confirmation_required"):
                 self.bridge.confirmation_required.emit(item)
 
+        async def _on_screen_capture(event: Any) -> None:
+            source = getattr(event, "source", "hotkey")
+            hotkey = getattr(event, "hotkey", "")
+            if self.bridge and hasattr(self.bridge, "screen_capture_triggered"):
+                self.bridge.screen_capture_triggered.emit(source, hotkey)
+
         eb.subscribe(StateChanged, _on_state_changed)
         eb.subscribe(SpeechStarted, _on_speech_started)
         eb.subscribe(SpeechStopped, _on_speech_stopped)
         eb.subscribe(WakeWordDetected, _on_wakeword)
         eb.subscribe(AutomationConfirmationRequired, _on_conf_req)
+        try:
+            from denver.automation.hotkey import ScreenCaptureTriggered
+            eb.subscribe(ScreenCaptureTriggered, _on_screen_capture)
+        except Exception as exc:
+            logger.debug("Could not subscribe to ScreenCaptureTriggered: %s", exc)
         self._subscribed = True
         logger.debug("Bound UIController to Denver EventBus.")
 

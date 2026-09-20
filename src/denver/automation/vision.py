@@ -60,11 +60,17 @@ class VisionEngine:
         self,
         screenshot_controller: ScreenshotController | None = None,
         output_dir: Path | str = "data/screenshots",
+        cloud_disclosure_acknowledged: bool = False,
     ) -> None:
         self.screenshot_controller = screenshot_controller or ScreenshotController(output_dir=output_dir)
         self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._last_screen_context: dict[str, Any] | None = None
+        self.cloud_disclosure_acknowledged = cloud_disclosure_acknowledged
+
+    def acknowledge_cloud_disclosure(self, acknowledged: bool = True) -> None:
+        """Acknowledge or revoke user consent for cloud screen data transmission."""
+        self.cloud_disclosure_acknowledged = acknowledged
 
     def capture_screen_base64(
         self,
@@ -137,6 +143,27 @@ class VisionEngine:
                     latency_ms=elapsed_ms,
                     error="AirGappedModeActive",
                 )
+
+        # Pre-flight Cloud Data Disclosure Verification (when Air-Gapped mode is OFF)
+        if provider_router and not getattr(provider_router, "air_gapped_mode", False):
+            if hasattr(provider_router, "get_ordered_providers"):
+                try:
+                    candidates = provider_router.get_ordered_providers(has_images=True)
+                    if candidates and getattr(candidates[0], "provider_type", None) == ProviderType.CLOUD:
+                        if not self.cloud_disclosure_acknowledged:
+                            elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+                            logger.warning("Screen vision analysis blocked: Cloud screen disclosure not acknowledged.")
+                            return VisionAnalysisResult(
+                                success=False,
+                                text="Screen capture cloud transmission blocked: Cloud screen data disclosure must be acknowledged before sending desktop screenshots off-device.",
+                                screenshot_path=screenshot_path,
+                                width=width,
+                                height=height,
+                                latency_ms=elapsed_ms,
+                                error="CloudDisclosureRequired",
+                            )
+                except Exception as exc:
+                    logger.debug("Could not inspect provider candidates for cloud disclosure: %s", exc)
 
         # Step 1: Capture screen if not already provided
         if not image_base64:

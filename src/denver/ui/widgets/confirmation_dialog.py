@@ -142,3 +142,103 @@ class SecurityConfirmationDialog(QDialog):
         if _PYSIDE_AVAILABLE and hasattr(self, "cancelled"):
             self.cancelled.emit(self._item.token)
         self.reject()
+
+
+class CloudVisionDisclosureDialog(QDialog):
+    """Modal dialog disclosing off-device cloud data transfer prior to screen analysis."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Cloud Vision Privacy Disclosure — Denver")
+        self.setFixedSize(460, 260)
+        self.setModal(True)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {BG_SURFACE};
+                border: 2px solid #8B5CF6;
+                border-radius: 12px;
+            }}
+        """)
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        if not _PYSIDE_AVAILABLE:
+            return
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Header with Cloud Privacy Badge
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+
+        icon_lbl = QLabel("☁️")
+        icon_lbl.setStyleSheet("font-size: 20px;")
+        header_row.addWidget(icon_lbl)
+
+        title_lbl = QLabel("CLOUD VISION PRIVACY DISCLOSURE")
+        title_lbl.setStyleSheet("color: #C084FC; font-size: 13px; font-weight: 800; letter-spacing: 1.2px;")
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+
+        layout.addLayout(header_row)
+
+        # Body description
+        desc_lbl = QLabel(
+            "Denver is about to capture and transmit your active desktop screen "
+            "off-device to Google Gemini / Groq cloud services for multimodal AI analysis.\n\n"
+            "Air-Gapped mode is currently OFF. Please confirm whether you allow "
+            "sending desktop screenshots to cloud AI providers."
+        )
+        desc_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 500; line-height: 1.5;")
+        desc_lbl.setWordWrap(True)
+        layout.addWidget(desc_lbl)
+
+        layout.addStretch()
+
+        # Action Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        cancel_btn = QPushButton("CANCEL (KEEP ON-DEVICE)")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.08);
+                color: {TEXT_SECONDARY};
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.16);
+                color: #FFFFFF;
+            }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        allow_btn = QPushButton("ALLOW & PROCEED")
+        allow_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        allow_btn.setStyleSheet("""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00D2FF, stop:1 #8B5CF6);
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00B4D8, stop:1 #7C3AED);
+            }}
+        """)
+        allow_btn.clicked.connect(self.accept)
+        btn_row.addWidget(allow_btn)
+
+        layout.addLayout(btn_row)
+

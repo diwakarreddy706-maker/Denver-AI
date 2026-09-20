@@ -100,8 +100,18 @@ class IntentRouter:
         self._sleep_re = re.compile(r"^(?:go\s+to\s+sleep(?:\s+mode)?|enter\s+sleep(?:\s+mode)?|sleep\s+mode|sleep|take\s+a\s+nap)$", re.IGNORECASE)
         self._wake_re = re.compile(r"^(?:wake\s+up|are\s+you\s+awake|wake)$", re.IGNORECASE)
         self._assistant_call_re = re.compile(r"^(?:(?:hey|hi|hello|ok|okay)?\s*(?:denver|assistant)|are\s+you\s+there|can\s+you\s+hear\s+me|you\s+there|listen\s+to\s+me)$", re.IGNORECASE)
-        self._confirm_re = re.compile(r"^(?:yes|proceed|confirm|do\s+it|confirm\s+(cnf_[a-zA-Z0-9]+))$")
-        self._cancel_re = re.compile(r"^(?:no|cancel|abort|stop|don't\s+do\s+it)$")
+        self._confirm_re = re.compile(
+            r"^(?:yes(?:[,\s]+do\s+it|[,\s]+please|[,\s]+confirm)?|proceed|confirm(?:\s+it|\s+fix|\s+action)?|do\s+it|confirm\s+(cnf_[a-zA-Z0-9]+))$",
+            re.IGNORECASE,
+        )
+        self._cancel_re = re.compile(
+            r"^(?:no(?:[,\s]+cancel|[,\s]+don't|[,\s]+thanks)?|cancel(?:\s+it|\s+action)?|abort|stop|don't\s+do\s+it)$",
+            re.IGNORECASE,
+        )
+        self._terminal_fix_re = re.compile(
+            r"^(?:(?:execute|run|apply)(?:\s+(?:the|this|recommended))?\s+(?:terminal\s+)?fix(?:\s*:\s*(.+))?|fix\s+(?:the\s+|this\s+)?(?:terminal\s+)?error(?:\s*:\s*(.+))?)$",
+            re.IGNORECASE,
+        )
 
         # 12b. Clipboard & Typing Automation
         self._clipboard_summary_re = re.compile(r"^(?:summarize\s+(?:my\s+|the\s+)?clipboard|summarize\s+copied\s+text|what\s+is\s+(?:this\s+|my\s+)?clipboard\s+about)$", re.IGNORECASE)
@@ -368,6 +378,9 @@ class IntentRouter:
                 confidence=1.0,
                 risk_level=CommandRiskLevel.SAFE,
             )
+
+        # Strip optional leading assistant prefix ("Denver, execute fix" -> "execute fix")
+        text = re.sub(r"^(?:(?:hey|hi|hello|ok|okay)?\s*denver[,:\s]+)", "", text, flags=re.IGNORECASE).strip()
 
         # 1. Utility Check
         if self._time_re.match(text):
@@ -1439,6 +1452,43 @@ class IntentRouter:
                 confidence=1.0,
                 risk_level=CommandRiskLevel.SAFE,
                 requires_confirmation=False,
+            )
+
+        # 11a. Privileged Action Confirmation & Cancellation
+        m = self._confirm_re.match(text)
+        if m:
+            token = m.group(1).strip() if (m.groups() and m.group(1)) else ""
+            return CommandIntent(
+                intent_name="confirm_action",
+                action_name="confirm_action",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"token": token} if token else {},
+                risk_level=CommandRiskLevel.SAFE,
+            )
+
+        if self._cancel_re.match(text):
+            return CommandIntent(
+                intent_name="cancel_action",
+                action_name="cancel_action",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.SAFE,
+            )
+
+        # 11b. Autonomous Terminal Fix Execution
+        m = self._terminal_fix_re.match(text)
+        if m:
+            fix_cmd = (m.group(1) or m.group(2) or "").strip()
+            return CommandIntent(
+                intent_name="execute_terminal_fix",
+                action_name="execute_terminal_fix",
+                category=CommandCategory.SYSTEM,
+                confidence=1.0,
+                params={"command": fix_cmd} if fix_cmd else {},
+                risk_level=CommandRiskLevel.HIGH,
+                requires_confirmation=True,
             )
 
         # 11b. Clipboard & Typing Controls

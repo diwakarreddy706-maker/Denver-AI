@@ -56,12 +56,14 @@ class AutomationExecutor:
         system: SystemController | None = None,
         confirmation: ConfirmationManager | None = None,
         spotify: Any | None = None,
+        terminal_fix: Any | None = None,
         event_bus: DenverEventBus | None = None,
         allow_high_risk_actions: bool = False,
     ) -> None:
         from denver.automation.clipboard import ClipboardController
         from denver.automation.keyboard import KeyboardController
         from denver.automation.spotify import SpotifyController
+        from denver.automation.terminal_fix import TerminalFixController
 
         self.registry = registry or AutomationRegistry()
         self.applications = applications or ApplicationController(self.registry)
@@ -73,6 +75,7 @@ class AutomationExecutor:
         self.clipboard = ClipboardController()
         self.keyboard = KeyboardController()
         self.spotify = spotify or SpotifyController()
+        self.terminal_fix = terminal_fix or TerminalFixController()
         self.confirmation = confirmation or ConfirmationManager()
         self.event_bus = event_bus or get_event_bus()
         self.allow_high_risk_actions = allow_high_risk_actions
@@ -91,11 +94,26 @@ class AutomationExecutor:
         )
 
         # 1. High-Risk Action Confirmation Gate
-        if action_name in {"lock_workstation"}:
+        if action_name in {"lock_workstation", "execute_terminal_fix"}:
             if not self.allow_high_risk_actions and not request.params.get("force", False):
                 if not request.confirmation_token:
-                    # Issue confirmation requirement
-                    prompt = "Locking your workstation requires confirmation. Proceed?"
+                    cmd = request.params.get("command", "") or request.target
+                    if action_name == "execute_terminal_fix":
+                        is_safe, val_err, _ = self.terminal_fix.validate_fix_command(cmd)
+                        if not is_safe:
+                            logger.warning("Terminal fix validation failed: %s", val_err)
+                            return AutomationResult(
+                                success=False,
+                                action=action_name,
+                                target=cmd,
+                                message=f"Terminal fix rejected by security validator: {val_err}",
+                                risk_level=AutomationRisk.HIGH,
+                                error=val_err,
+                            )
+                        prompt = f"Execute terminal fix: `{cmd}`?"
+                    else:
+                        prompt = "Locking your workstation requires confirmation. Proceed?"
+
                     req = self.confirmation.create_pending(
                         action_name=action_name,
                         action_params=request.params,
@@ -114,7 +132,11 @@ class AutomationExecutor:
                         action=action_name,
                         target=request.target,
                         message=prompt,
-                        data={"confirmation_token": req.token, "expires_at": req.expires_at},
+                        data={
+                            "confirmation_token": req.token,
+                            "expires_at": req.expires_at,
+                            "command": cmd if action_name == "execute_terminal_fix" else None,
+                        },
                         risk_level=AutomationRisk.HIGH,
                         requires_confirmation=True,
                         confirmation_token=req.token,
@@ -325,6 +347,12 @@ class AutomationExecutor:
                 res = self.spotify.play_query(q)
                 if res.success:
                     await self.event_bus.publish(SpotifyPlaybackChanged(action="play_query", query=q))
+
+            elif action_name == "execute_terminal_fix":
+                cmd = request.params.get("command", "") or request.target
+                timeout = float(request.params.get("timeout", 60.0))
+                cwd = request.params.get("cwd")
+                res = self.terminal_fix.execute_fix(command=cmd, timeout_seconds=timeout, cwd=cwd)
 
             else:
                 res = AutomationResult(

@@ -394,19 +394,19 @@
 - [x] **Priority 4**: Commercial SaaS UI Dashboard Redesign (Reference Image 2 pixel-perfect dark navy HUD + dynamic time-of-day greeting).
 - [x] **Priority 5**: Production Plugin Subsystem (4 functional plugins in `plugins/` + sandboxing + GUI manager).
 - [x] **Priority 6**: Multimodal Screen Awareness Pipeline (Gemini `gemini-flash-latest` integration + multimodal router priority).
+- [x] **Screen Awareness Suite (Components 1 - 4 Complete)**:
+  - [x] **Component 1 - Interactive Screen Awareness HUD & Global Hotkey**: Camera lens icon on Cockpit AI bar, `Ctrl+Alt+S` global hotkey, mandatory cloud disclosure modal, in-memory per-session consent, and toast HUD notifications.
+  - [x] **Component 2 - Native Win32 GDI Screen Capture Fallback**: Low-level `ctypes.windll.user32` and `gdi32` BitBlt bitmap capture engine for high-DPI and background window reliability.
+  - [x] **Component 3 - Continuous Multi-Turn Vision Context**: Rolling visual context cache retained in `ContextEngine`, enabling multi-turn follow-up queries without re-capturing.
+  - [x] **Component 4 - Autonomous Terminal Fix Execution with Confirmation Gates**: Automated extraction of terminal fix commands from diagnosis text, strict safety validation (tokenization, destructive command blocking, unquoted operator blocking, `shell=False` execution), high-risk confirmation token staging, and voice confirmation (*"Yes, do it"*, *"confirm fix"*).
 
 ---
 
-### 🌅 Tomorrow's Immediate Plan (Where to Resume)
-1. **Interactive Screen Awareness HUD Trigger & Global Hotkey**:
-   - Add a direct camera/lens icon button to the AI input bar in Cockpit GUI.
-   - Register a global hotkey (e.g. `Ctrl+Alt+S`) to trigger instant screen capture + diagnosis from any game, IDE, or browser.
-2. **Native Win32 GDI Screen Capture Fallback**:
-   - Implement `ctypes.windll.user32` + `gdi32` BitBlt screen capture fallback in `ScreenshotController` & `VisionEngine` to guarantee 100% capture reliability across high-DPI and background sessions.
-3. **Continuous Multi-Turn Vision Context**:
-   - Keep the most recent screenshot in the active conversation context window for follow-up questions (*"What about that red button?"*, *"Can you explain line 15?"*) without requiring repeated captures.
-4. **Autonomous Fix Execution with Confirmation Gates**:
-   - Allow Denver to offer: *"Would you like me to run the fix in your terminal?"* and execute the fix upon user voice confirmation (*"Yes, do it"*).
+### 🌅 Next Session Immediate Plan
+1. **End-to-End Live Voice Testing**:
+   - Verify continuous microphone hotkey + voice utterance loop for screen diagnosis and terminal fix confirmation in real Windows session.
+2. **Terminal Output Feedback Loop**:
+   - Capture post-execution terminal stdout/stderr and feed back to VisionEngine/ContextEngine to confirm if the fix resolved the error.
 
 ---
 
@@ -416,6 +416,7 @@
 |---|---|---|
 | **Voice Assistant (Headless)** | `python main.py --headless` | Full hands-free voice loop (Wake word + Chime + STT + LLM + TTS + Routines + WhatsApp + Spotify). |
 | **Cyber Cockpit GUI** | `python -m denver --gui` | PySide6 dark cockpit with animated HUD visualizer, DAG workflows, and live telemetry. |
+| **Diagnose Screen** | `python main.py -c "analyze screen"` | Capture active screen, diagnose errors or content with VisionEngine. |
 | **Repo Hygiene Audit** | `python repo_hygiene.py --clean` | Pre-commit/pre-release cache cleanup & secret scan. |
 | **Build Portable Package** | `python release_build.py --dry-run` | Stage & audit Windows portable distribution package. |
 | **Lock Laptop** | `python main.py -c "lock the laptop"` | Instantly lock Windows session via CLI or voice. |
@@ -437,20 +438,22 @@
 - `data/routines.json` (Curated compound routines dataset)
 - `data/contacts.json` (413 user contacts)
 - `data/apps.json` (81 discovered applications and shortcuts)
+- `src/denver/automation/terminal_fix.py` (Autonomous terminal fix controller, safety validator & executor)
+- `src/denver/vision/engine.py` (VisionEngine with Win32 GDI fallback & multimodal routing)
 - `src/denver/automation/spotify.py` (Spotify Voice Controller & Windows virtual media keys)
 - `src/denver/automation/whatsapp.py` (WhatsApp voice messaging & ContactBook integration)
 - `src/denver/providers/router.py` (AI Provider Router with Air-Gapped enclosure & dynamic toggles)
 - `src/denver/scheduler/compound_routines.py` (Compound routine loader & matcher)
 - `src/denver/scheduler/routine_registry.py` (Routine lifecycle & seeding)
-- `src/denver/context/engine.py` (Context engine & prompt builder)
-- `src/denver/commands/router.py` (Deterministic intent routing)
-- `src/denver/commands/service.py` (Command orchestration & multi-step execution)
+- `src/denver/context/engine.py` (Context engine & continuous vision context cache)
+- `src/denver/commands/router.py` (Deterministic intent routing & voice confirmations)
+- `src/denver/commands/service.py` (Command orchestration, screen diagnosis & terminal fix staging)
 - `src/denver/audio/pipeline.py` (Real-time voice processing & state transitions)
 - `src/denver/audio/stt.py` (Dual Groq Cloud Whisper & Faster-Whisper STT engines)
 - `src/denver/release/builder.py` (Windows Portable release builder)
 - `src/denver/release/verifier.py` (Release security artifact verifier)
 - `src/denver/ui/widgets/plugins_widget.py` (Cockpit modular plugin manager)
 - `src/denver/health/repair.py` (Self-healing auto-repair engine)
-- `tests/unit/` & `tests/integration/` (459 automated unit & integration tests)
+- `tests/unit/` & `tests/integration/` (503 automated unit & integration tests)
 
 

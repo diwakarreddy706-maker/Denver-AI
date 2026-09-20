@@ -93,3 +93,101 @@ def test_play_capture_sound_disclosure():
         with patch("sys.platform", "win32"):
             play_capture_sound()
             mock_beep.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_screen_capture_triggered_event_subscription_and_ui_bridge():
+    """Confirm that ScreenCaptureTriggered published on EventBus dispatches via UIController to the GUI bridge."""
+    from denver.ui.controller import UIController, QtEventBridge
+
+    event_bus = DenverEventBus()
+    mock_app = MagicMock()
+    mock_app.event_bus = event_bus
+
+    bridge = MagicMock(spec=QtEventBridge)
+    bridge.screen_capture_triggered = MagicMock()
+
+    controller = UIController(app_instance=mock_app, bridge=bridge)
+    controller.bind_event_bus()
+
+    # Publish ScreenCaptureTriggered event
+    evt = ScreenCaptureTriggered(source="hotkey", hotkey="ctrl+alt+s")
+    await event_bus.publish(evt)
+    await asyncio.sleep(0.05)
+
+    # Confirm bridge signal was emitted with event parameters
+    bridge.screen_capture_triggered.emit.assert_called_once_with("hotkey", "ctrl+alt+s")
+
+
+def test_ui_trigger_screen_awareness_dialog_declined():
+    """Verify that declining the CloudVisionDisclosureDialog cancels the screen capture completely."""
+    from denver.ui.window import MainWindow
+    from denver.ui.controller import UIController
+
+    mock_controller = MagicMock(spec=UIController)
+    mock_app = MagicMock()
+    mock_app.provider_router.air_gapped_mode = False
+    mock_controller.app = mock_app
+
+    with patch.object(MainWindow, "__init__", return_value=None):
+        win = MainWindow(controller=mock_controller)
+        win.controller = mock_controller
+        win._cloud_screen_disclosure_acknowledged = False
+        win.show_capture_toast = MagicMock()
+
+        with patch("denver.automation.hotkey.play_capture_sound"):
+            with patch("denver.ui.widgets.confirmation_dialog.CloudVisionDisclosureDialog") as mock_dlg_cls:
+                mock_dlg = MagicMock()
+                mock_dlg.exec.return_value = 0  # User clicked Cancel
+                mock_dlg_cls.return_value = mock_dlg
+
+                win._trigger_screen_awareness()
+
+                # Verify dialog was instantiated with parent and exec'd
+                mock_dlg_cls.assert_called_once_with(parent=win)
+                mock_dlg.exec.assert_called_once()
+
+                # Verify capture was cancelled: command was never submitted
+                mock_controller.submit_command.assert_not_called()
+                assert win._cloud_screen_disclosure_acknowledged is False
+
+
+def test_ui_trigger_screen_awareness_dialog_allowed():
+    """Verify that allowing the CloudVisionDisclosureDialog acknowledges disclosure and submits command."""
+    from denver.ui.window import MainWindow
+    from denver.ui.controller import UIController
+
+    mock_controller = MagicMock(spec=UIController)
+    mock_app = MagicMock()
+    mock_app.provider_router.air_gapped_mode = False
+    mock_app.vision_engine = MagicMock()
+    mock_controller.app = mock_app
+
+    with patch.object(MainWindow, "__init__", return_value=None):
+        win = MainWindow(controller=mock_controller)
+        win.controller = mock_controller
+        win._cloud_screen_disclosure_acknowledged = False
+        win.show_capture_toast = MagicMock()
+
+        with patch("denver.automation.hotkey.play_capture_sound"):
+            with patch("denver.ui.widgets.confirmation_dialog.CloudVisionDisclosureDialog") as mock_dlg_cls:
+                mock_dlg = MagicMock()
+                mock_dlg.exec.return_value = 1  # User clicked Allow
+                mock_dlg_cls.return_value = mock_dlg
+
+                win._trigger_screen_awareness()
+
+                # Verify dialog was shown
+                mock_dlg_cls.assert_called_once_with(parent=win)
+                mock_dlg.exec.assert_called_once()
+
+                # Verify vision engine was acknowledged
+                mock_app.vision_engine.acknowledge_cloud_disclosure.assert_called_once_with(True)
+                assert win._cloud_screen_disclosure_acknowledged is True
+
+                # Verify command was submitted
+                mock_controller.submit_command.assert_called_once_with(
+                    "Denver, look at my screen and describe what you see and diagnose any errors"
+                )
+
+

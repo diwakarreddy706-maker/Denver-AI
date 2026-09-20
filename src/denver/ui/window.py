@@ -368,6 +368,12 @@ class MainWindow(QMainWindow):
         if _PYSIDE_AVAILABLE:
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
+        self._cloud_screen_disclosure_acknowledged: bool = False
+        if self.controller and hasattr(self.controller, "app") and self.controller.app:
+            st = getattr(self.controller.app, "settings", None)
+            if st and getattr(st, "screen_cloud_disclosure_acknowledged", False):
+                self._cloud_screen_disclosure_acknowledged = True
+
         self._init_ui()
         self._bind_signals()
 
@@ -532,6 +538,26 @@ class MainWindow(QMainWindow):
         self.response_card.hide()
         center_layout.addWidget(self.response_card)
 
+        # Mandatory visual disclosure toast banner (Item 3)
+        self.capture_toast = QFrame()
+        self.capture_toast.setObjectName("CaptureToast")
+        self.capture_toast.setStyleSheet("""
+            QFrame#CaptureToast {
+                background-color: rgba(6, 11, 23, 0.94);
+                border: 1px solid #00E5FF;
+                border-radius: 16px;
+                padding: 4px 14px;
+            }
+        """)
+        toast_layout = QHBoxLayout(self.capture_toast)
+        toast_layout.setContentsMargins(12, 4, 12, 4)
+        toast_layout.setSpacing(8)
+        self.toast_lbl = QLabel("📸 Screen Captured — Analyzing desktop context...")
+        self.toast_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 600;")
+        toast_layout.addWidget(self.toast_lbl)
+        self.capture_toast.hide()
+        center_layout.addWidget(self.capture_toast, alignment=Qt.AlignmentFlag.AlignCenter)
+
         center_layout.addStretch(1)
 
         # B5. Large Rounded AI Input Bar (Matching Image 2)
@@ -611,6 +637,22 @@ class MainWindow(QMainWindow):
         """)
         self.camera_btn.clicked.connect(self._trigger_screen_awareness)
         input_row.addWidget(self.camera_btn)
+
+        # Persistent visible indicator for vision privacy (Item 4)
+        self.vision_cloud_badge = QLabel("☁️ Cloud Vision")
+        self.vision_cloud_badge.setToolTip("Cloud Vision Active: Screenshots are analyzed off-device by Google Gemini/Groq.\nToggle Air-Gapped mode to restrict to 100% on-device.")
+        self.vision_cloud_badge.setStyleSheet("""
+            QLabel {
+                background: rgba(139, 92, 246, 0.15);
+                color: #C084FC;
+                border: 1px solid rgba(139, 92, 246, 0.35);
+                border-radius: 9px;
+                padding: 2px 7px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+        """)
+        input_row.addWidget(self.vision_cloud_badge)
 
         # Mic button
         self.mic_btn = QPushButton("🎙")
@@ -727,10 +769,48 @@ class MainWindow(QMainWindow):
         if self.controller:
             self.controller.submit_command(text)
 
+    def show_capture_toast(self, message: str, duration_ms: int = 3500) -> None:
+        """Display temporary floating disclosure toast banner."""
+        if not _PYSIDE_AVAILABLE or not hasattr(self, "capture_toast"):
+            return
+        self.toast_lbl.setText(message)
+        self.capture_toast.show()
+        QTimer.singleShot(duration_ms, self.capture_toast.hide)
+
+    def _on_screen_capture_triggered(self, source: str, hotkey: str) -> None:
+        """Mandatory visual disclosure subscriber for ScreenCaptureTriggered events."""
+        logger.info("Visual disclosure triggered: screen captured via %s (%s)", source, hotkey)
+        hotkey_label = hotkey.upper() if hotkey else "Trigger"
+        self.show_capture_toast(f"📸 Screen Captured via {hotkey_label} — Analyzing desktop context...")
+        self.bottom_bar.state_lbl.setText("📸 Screen Captured...")
+        self.bottom_bar.state_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 700;")
+        self.ai_orb.set_state(DenverState.PROCESSING)
+
     def _trigger_screen_awareness(self) -> None:
         """Trigger instant multimodal desktop screen inspection."""
         from denver.automation.hotkey import play_capture_sound
         play_capture_sound()
+
+        # Item 4: Check if cloud screen disclosure is required before sending off-device
+        is_air_gapped = False
+        if self.controller and hasattr(self.controller, "app") and self.controller.app:
+            router = getattr(self.controller.app, "provider_router", None)
+            if router and getattr(router, "air_gapped_mode", False):
+                is_air_gapped = True
+
+        if not is_air_gapped and not self._cloud_screen_disclosure_acknowledged:
+            from denver.ui.widgets.confirmation_dialog import CloudVisionDisclosureDialog
+            dialog = CloudVisionDisclosureDialog(parent=self)
+            if not dialog.exec():
+                logger.info("User declined cloud screen capture transmission disclosure.")
+                return
+            self._cloud_screen_disclosure_acknowledged = True
+            if self.controller and hasattr(self.controller, "app") and self.controller.app:
+                v_eng = getattr(self.controller.app, "vision_engine", None)
+                if v_eng:
+                    v_eng.acknowledge_cloud_disclosure(True)
+
+        self.show_capture_toast("📸 Screen Captured — Inspecting active window...")
         if self.controller:
             self.controller.submit_command("Denver, look at my screen and describe what you see and diagnose any errors")
 
@@ -770,6 +850,8 @@ class MainWindow(QMainWindow):
             bridge.confirmation_requested.connect(self._on_confirmation_requested)
         if hasattr(bridge, "voice_state_changed"):
             bridge.voice_state_changed.connect(self._on_voice_state_changed)
+        if hasattr(bridge, "screen_capture_triggered"):
+            bridge.screen_capture_triggered.connect(self._on_screen_capture_triggered)
 
     def _on_telemetry_updated(self, state: Any) -> None:
         cpu = getattr(state, "cpu_percent", None)

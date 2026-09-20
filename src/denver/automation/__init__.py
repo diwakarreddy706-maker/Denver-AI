@@ -43,6 +43,7 @@ from denver.automation.models import (
 from denver.automation.registry import AutomationRegistry
 from denver.automation.screenshot import ScreenshotController
 from denver.automation.system import SystemController
+from denver.automation.terminal_fix import TerminalFixController
 from denver.automation.vision import VisionAnalysisResult, VisionEngine
 from denver.automation.volume import VolumeController
 from denver.automation.web_agent import WebActionResult, WebAgent, WebSearchResult
@@ -79,6 +80,7 @@ __all__ = [
     "ScreenshotController",
     "ScreenshotError",
     "SystemController",
+    "TerminalFixController",
     "URLSecurityError",
     "VisionAnalysisResult",
     "VisionEngine",

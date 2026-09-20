@@ -110,6 +110,7 @@ class CommandEngineService:
         self.vision_engine = VisionEngine(
             screenshot_controller=getattr(self.automation, "screenshot", None),
             output_dir=getattr(self.settings, "screenshot_dir", "data/screenshots"),
+            cloud_disclosure_acknowledged=getattr(self.settings, "screen_cloud_disclosure_acknowledged", False),
         )
         from denver.audio.meeting import MeetingIntelligenceEngine
         self.meeting_engine = MeetingIntelligenceEngine(
@@ -603,6 +604,16 @@ class CommandEngineService:
                 category=CommandCategory.SYSTEM,
                 risk_level=CommandRiskLevel.LOW,
                 handler=self._handle_analyze_screen,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="execute_terminal_fix",
+                description="Safely validates, stages confirmation for, and executes an autonomous terminal fix command.",
+                category=CommandCategory.SYSTEM,
+                risk_level=CommandRiskLevel.HIGH,
+                requires_confirmation=True,
+                handler=self._handle_execute_terminal_fix,
             )
         )
         self.registry.register(
@@ -1955,11 +1966,43 @@ class CommandEngineService:
         )
 
         if vision_res.success:
+            data = vision_res.to_dict()
+            msg = vision_res.text
+
+            # Component 4: If error diagnosis mode, automatically extract proposed fix and stage confirmation
+            term_fix_ctrl = getattr(self.automation, "terminal_fix", None)
+            if term_fix_ctrl:
+                fix_proposal = term_fix_ctrl.extract_fix_proposal(vision_res.text)
+                if fix_proposal and fix_proposal.get("command"):
+                    fix_cmd = fix_proposal["command"]
+                    is_safe, val_err, _ = term_fix_ctrl.validate_fix_command(fix_cmd)
+                    if is_safe:
+                        data["proposed_fix"] = fix_cmd
+                        if self.vision_engine._last_screen_context:
+                            self.vision_engine._last_screen_context["proposed_fix"] = fix_cmd
+
+                        conf_req = self.automation.confirmation.create_pending(
+                            action_name="execute_terminal_fix",
+                            action_params={"command": fix_cmd},
+                            prompt_message=f"Execute terminal fix: `{fix_cmd}`?",
+                        )
+                        data["confirmation_token"] = conf_req.token
+                        from denver.runtime.events import AutomationConfirmationRequired
+                        await self.event_bus.publish(
+                            AutomationConfirmationRequired(
+                                token=conf_req.token,
+                                action_name="execute_terminal_fix",
+                                target=fix_cmd,
+                                prompt_message=f"Execute terminal fix: `{fix_cmd}`?",
+                            )
+                        )
+                        msg += f"\n\n⚡ Proposed Terminal Fix: `{fix_cmd}`\nSay 'Yes, do it' or confirm in Cockpit to execute."
+
             return ActionResult(
                 success=True,
-                message=vision_res.text,
+                message=msg,
                 action_name="analyze_screen",
-                data=vision_res.to_dict(),
+                data=data,
             )
         else:
             return ActionResult(
@@ -1969,6 +2012,55 @@ class CommandEngineService:
                 data=vision_res.to_dict(),
                 error="VisionAnalysisError",
             )
+
+    async def _handle_execute_terminal_fix(self, params: dict[str, Any]) -> ActionResult:
+        cmd = params.get("command", "") or params.get("target", "")
+        # If no explicit command is provided, check recent screen context
+        if not cmd:
+            recent_ctx = self.vision_engine.get_recent_screen_context()
+            if recent_ctx and recent_ctx.get("proposed_fix"):
+                cmd = recent_ctx["proposed_fix"]
+            elif recent_ctx and recent_ctx.get("analysis_text"):
+                term_fix_ctrl = getattr(self.automation, "terminal_fix", None)
+                if term_fix_ctrl:
+                    extracted = term_fix_ctrl.extract_fix_proposal(recent_ctx["analysis_text"])
+                    if extracted and extracted.get("command"):
+                        cmd = extracted["command"]
+
+        if not cmd:
+            return ActionResult(
+                success=False,
+                message="No terminal fix command was specified or detected from recent screen context.",
+                action_name="execute_terminal_fix",
+                error="MissingCommand",
+            )
+
+        token = params.get("token") or params.get("confirmation_token")
+        auto_req = AutomationRequest(
+            action_name="execute_terminal_fix",
+            target=cmd,
+            params={"command": cmd, "timeout": params.get("timeout", 60.0), "cwd": params.get("cwd")},
+            confirmation_token=token,
+        )
+        res = await self.automation.execute(auto_req)
+
+        if res.requires_confirmation:
+            out_data = dict(res.data)
+            out_data["requires_confirmation"] = True
+            return ActionResult(
+                success=True,
+                message=f"Proposed fix: `{cmd}`. Confirmation required before execution — please confirm in Cockpit or say 'Yes, do it'.",
+                action_name="execute_terminal_fix",
+                data=out_data,
+            )
+
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="execute_terminal_fix",
+            data=res.data,
+            error=res.error,
+        )
 
     async def _handle_start_meeting_notes(self, params: dict[str, Any]) -> ActionResult:
         title = params.get("title", "Live Meeting")

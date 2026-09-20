@@ -266,3 +266,115 @@ def test_win32_gdi_fallback_capture(tmp_path):
                 assert captured.size == (640, 480)
                 mock_gdi.assert_called_once()
 
+
+@pytest.mark.asyncio
+async def test_vision_engine_cloud_disclosure_blocks_unacknowledged(tmp_path):
+    """Confirm that when air-gap is OFF and cloud provider is active, unacknowledged requests are blocked."""
+    from denver.providers.registry import ProviderRegistry
+
+    engine = VisionEngine(output_dir=tmp_path, cloud_disclosure_acknowledged=False)
+
+    mock_cloud_provider = MagicMock()
+    mock_cloud_provider.name = "gemini"
+    mock_cloud_provider.enabled = True
+    mock_cloud_provider.provider_type = ProviderType.CLOUD
+    mock_cloud_provider.generate = AsyncMock()
+
+    registry = ProviderRegistry()
+    registry.register(mock_cloud_provider)
+
+    router = ProviderRouter(registry=registry, air_gapped_mode=False)
+
+    result = await engine.analyze_screen(
+        prompt="Describe screen",
+        provider_router=router,
+    )
+
+    # Assert analysis was blocked and cloud provider generate was NEVER called
+    assert result.success is False
+    assert "CloudDisclosureRequired" in (result.error or "")
+    mock_cloud_provider.generate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_vision_engine_cloud_disclosure_proceeds_when_acknowledged(tmp_path):
+    """Confirm that once user acknowledges cloud disclosure, screen capture reaches the cloud provider."""
+    from denver.providers.registry import ProviderRegistry
+
+    engine = VisionEngine(output_dir=tmp_path, cloud_disclosure_acknowledged=False)
+
+    mock_cloud_provider = MagicMock()
+    mock_cloud_provider.name = "gemini"
+    mock_cloud_provider.enabled = True
+    mock_cloud_provider.provider_type = ProviderType.CLOUD
+    mock_cloud_provider.generate = AsyncMock(
+        return_value=ProviderResponse(
+            text="Cloud analysis completed.",
+            provider_name="gemini",
+            model_name="gemini-flash-latest",
+            success=True,
+        )
+    )
+
+    registry = ProviderRegistry()
+    registry.register(mock_cloud_provider)
+
+    router = ProviderRouter(registry=registry, air_gapped_mode=False)
+
+    # Acknowledge user consent
+    engine.acknowledge_cloud_disclosure(True)
+    assert engine.cloud_disclosure_acknowledged is True
+
+    result = await engine.analyze_screen(
+        prompt="Describe screen",
+        provider_router=router,
+    )
+
+    assert result.success is True
+    assert result.text == "Cloud analysis completed."
+    mock_cloud_provider.generate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_vision_engine_blocks_before_screen_capture_when_unacknowledged(tmp_path):
+    """Confirm that when cloud provider is only option and disclosure is False,
+
+    execution blocks with error='CloudDisclosureRequired' BEFORE capture_screen_base64
+    or grab_desktop_image is invoked, ensuring zero image processing occurs.
+    """
+    from denver.providers.registry import ProviderRegistry
+
+    engine = VisionEngine(output_dir=tmp_path, cloud_disclosure_acknowledged=False)
+
+    mock_cloud_provider = MagicMock()
+    mock_cloud_provider.name = "gemini"
+    mock_cloud_provider.enabled = True
+    mock_cloud_provider.provider_type = ProviderType.CLOUD
+    mock_cloud_provider.generate = AsyncMock()
+
+    registry = ProviderRegistry()
+    registry.register(mock_cloud_provider)
+
+    router = ProviderRouter(registry=registry, air_gapped_mode=False)
+
+    with patch.object(engine, "capture_screen_base64", wraps=engine.capture_screen_base64) as mock_capture:
+        with patch("denver.automation.screenshot.grab_desktop_image") as mock_grab:
+            result = await engine.analyze_screen(
+                prompt="Examine my screen for bugs",
+                provider_router=router,
+            )
+
+            # 1. Assert backend blocked with CloudDisclosureRequired
+            assert result.success is False
+            assert result.error == "CloudDisclosureRequired"
+            assert "Cloud screen data disclosure must be acknowledged" in result.text
+
+            # 2. Assert NO image was ever read, captured, or encoded
+            mock_capture.assert_not_called()
+            mock_grab.assert_not_called()
+
+            # 3. Assert cloud provider client was never invoked
+            mock_cloud_provider.generate.assert_not_called()
+
+
+
