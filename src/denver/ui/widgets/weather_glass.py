@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
     from PySide6.QtGui import (
         QBrush,
@@ -25,10 +25,33 @@ try:
         QWidget,
     )
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QFrame = object  # type: ignore
-    QWidget = object  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
+        from PySide6.QtGui import (
+            QBrush,
+            QColor,
+            QFont,
+            QLinearGradient,
+            QPainter,
+            QPainterPath,
+            QPen,
+            QRadialGradient,
+        )
+        from PySide6.QtWidgets import (
+            QFrame,
+            QHBoxLayout,
+            QLabel,
+            QVBoxLayout,
+            QWidget,
+        )
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QObject = object
+        Signal = lambda *args: None
+        QFrame = object
+        QWidget = object
 
 from denver.logging.logger import get_logger
 from denver.ui.theme import (
@@ -144,7 +167,7 @@ class ModernWeatherGlassCard(QFrame):
         """Update display with real weather information."""
         if city:
             self.loc_lbl.setText(f"📍 {city}")
-        self.temp_lbl.setText(f"{int(round(temp_c))}°C")
+        self.temp_lbl.setText(f"{round(temp_c)}°C")
         self.cond_lbl.setText(condition.capitalize() if condition else "Clear")
 
         cond_lower = condition.lower() if condition else ""
@@ -193,16 +216,28 @@ class ModernWeatherGlassCard(QFrame):
                     city = report.city or "Bengaluru"
                     country = "India"
                     display_loc = f"{city}, {country}" if country not in city else city
-                    self._bridge.data_ready.emit({
-                        "city": display_loc,
-                        "temp_c": report.temp_c,
-                        "condition": report.condition or "Overcast",
-                    })
+                    try:
+                        self._bridge.data_ready.emit({
+                            "city": display_loc,
+                            "temp_c": report.temp_c,
+                            "condition": report.condition or "Overcast",
+                        })
+                    except Exception:
+                        pass
                 else:
+                    try:
+                        self._bridge.failed.emit()
+                    except Exception:
+                        pass
+            except BaseException as ex:
+                try:
+                    logger.debug(f"Weather background fetch error: {ex}")
+                except Exception:
+                    pass
+                try:
                     self._bridge.failed.emit()
-            except Exception as ex:
-                logger.debug(f"Weather background fetch error: {ex}")
-                self._bridge.failed.emit()
+                except Exception:
+                    pass
 
 
         t = threading.Thread(target=_worker, daemon=True, name="ModernWeatherWorker")

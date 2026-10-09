@@ -239,11 +239,53 @@ class ProviderRouter:
                         )
                     )
 
+        err_msg = f"All available AI providers failed. Last error: {last_error}" if last_error else "No AI provider is currently available."
         return ProviderResponse(
             text="",
             success=False,
-            error=f"All available AI providers failed ({', '.join(attempted_providers)}): {last_error}",
+            error=err_msg,
         )
+
+    async def stream_generate(self, request: ProviderRequest):
+        """Stream tokens incrementally using local-first priority fallback."""
+        prompt_text = ""
+        if request.messages:
+            prompt_text = " ".join(m.get("content", "") for m in request.messages if isinstance(m, dict))
+
+        complexity = classify_complexity(
+            prompt=prompt_text,
+            has_tools=bool(request.tools),
+            has_memories=bool(request.context_summary),
+        )
+        has_images = bool(request.images)
+        providers = self.get_ordered_providers(complexity=complexity, has_images=has_images)
+        if not providers:
+            logger.warning("No AI provider available for streaming.")
+            return
+
+        for i, provider in enumerate(providers):
+            if provider.provider_type == ProviderType.CLOUD:
+                if self.air_gapped_mode:
+                    logger.debug("Skipping cloud provider '%s': air-gapped mode active.", provider.name)
+                    continue
+                if not self.cloud_fallback_enabled and self.active_provider != provider.name and not (has_images and provider.name in {"gemini", "groq"}):
+                    logger.debug("Skipping cloud provider '%s': cloud fallback disabled.", provider.name)
+                    continue
+
+            try:
+                if hasattr(provider, "stream_generate"):
+                    async for token in provider.stream_generate(request):
+                        yield token
+                    return
+                else:
+                    logger.info("Provider '%s' does not implement native streaming; falling back to whole-response generation.", provider.name)
+                    res = await provider.generate(request)
+                    if res.text:
+                        yield res.text
+                    return
+            except Exception as exc:
+                logger.warning("Streaming with provider '%s' failed: %s; attempting fallback provider.", provider.name, exc)
+                continue
 
     def get_health_status(self) -> dict[str, Any]:
         """Collect instantaneous health diagnostics across all configured providers."""

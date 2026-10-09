@@ -56,11 +56,12 @@ class AudioCapture:
         self.device_manager = device_manager or AudioDeviceManager()
 
         # Maximum chunks in ring buffer to guarantee memory bound
-        max_chunks = int(math.ceil((self.max_buffer_seconds * 1000.0) / self.format.frame_duration_ms))
+        max_chunks = math.ceil((self.max_buffer_seconds * 1000.0) / self.format.frame_duration_ms)
         self._buffer: collections.deque[AudioChunk] = collections.deque(maxlen=max_chunks)
 
         self._stream: Any = None
         self._is_capturing = False
+        self.is_muted = False
         self._thread: threading.Thread | None = None
         self._async_queue: asyncio.Queue[AudioChunk] = asyncio.Queue(maxsize=max_chunks)
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -78,11 +79,32 @@ class AudioCapture:
     def noise_floor(self) -> float:
         return self._noise_floor
 
+    def mute(self) -> None:
+        """Mute microphone audio capture and clear buffers."""
+        self.is_muted = True
+        self.clear()
+        logger.info("Microphone muted.")
+
+    def unmute(self) -> None:
+        """Unmute microphone audio capture."""
+        self.is_muted = False
+        logger.info("Microphone unmuted.")
+
+    def toggle_mute(self) -> bool:
+        """Toggle microphone mute status, returning new muted state."""
+        if self.is_muted:
+            self.unmute()
+        else:
+            self.mute()
+        return self.is_muted
+
     def _enqueue_chunk(self, chunk: AudioChunk) -> None:
         """Internal helper to enqueue a chunk into the buffer and async queue."""
+        if self.is_muted:
+            return
         self._buffer.append(chunk)
         if self._loop and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._safe_put, chunk)
+            self._loop.call_soon_threadsafe(self._put_chunk_nonblocking, chunk)
         else:
             try:
                 self._async_queue.put_nowait(chunk)
@@ -91,7 +113,7 @@ class AudioCapture:
 
     def _audio_callback(self, indata: Any, frames: int, time_info: Any, status: Any) -> None:
         """PortAudio callback running in audio driver thread."""
-        if not self._is_capturing:
+        if not self._is_capturing or self.is_muted:
             return
 
         if status:

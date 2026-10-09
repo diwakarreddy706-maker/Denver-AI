@@ -28,10 +28,14 @@ class ContextEngine:
         memory_service: MemoryService,
         event_bus: DenverEventBus | None = None,
         budget_config: ContextBudgetConfig | None = None,
+        self_model: Any | None = None,
+        desktop_observer: Any | None = None,
     ) -> None:
         self.memory = memory_service
         self.event_bus = event_bus or get_event_bus()
         self.budget_config = budget_config or ContextBudgetConfig()
+        self.self_model = self_model
+        self.desktop_observer = desktop_observer
         self.privacy_filter = CloudPrivacyFilter(
             allow_private_cloud=self.budget_config.allow_private_cloud,
             allow_sensitive_cloud=self.budget_config.allow_sensitive_cloud,
@@ -104,7 +108,43 @@ class ContextEngine:
         )
 
         # 6. Format Prompt Context String
-        context_parts = ["[SYSTEM CONTEXT: USER PROFILE & MEMORY]"]
+        context_parts = []
+        if getattr(self, "self_model", None):
+            try:
+                self_summary = self.self_model.get_self_state_summary()
+                if self_summary:
+                    context_parts.append(self_summary)
+            except Exception as exc:
+                logger.debug("Failed to get self-state summary: %s", exc)
+
+        if getattr(self, "desktop_observer", None):
+            try:
+                workspace_summary = self.desktop_observer.get_active_workspace_summary()
+                if workspace_summary:
+                    context_parts.append(workspace_summary)
+            except Exception as exc:
+                logger.debug("Failed to get active workspace summary: %s", exc)
+
+        # Pillar 3: Ground Active Corrections & Overrides (Priority Overrides)
+        if hasattr(self.memory, "corrections"):
+            try:
+                overrides_summary = await self.memory.corrections.format_prompt_overrides()
+                if overrides_summary:
+                    context_parts.append(overrides_summary)
+            except Exception as exc:
+                logger.debug("Failed to get corrections prompt overrides: %s", exc)
+
+        # Pillar 3: Ground Learned Habits & Patterns
+        if hasattr(self.memory, "habits_engine"):
+            try:
+                habits_summary = await self.memory.habits_engine.format_prompt_habits()
+                if habits_summary:
+                    context_parts.append(habits_summary)
+            except Exception as exc:
+                logger.debug("Failed to get learned habits prompt summary: %s", exc)
+
+        context_parts.append("[SYSTEM CONTEXT: USER PROFILE & MEMORY]")
+
         if pref_dict:
             context_parts.append(f"- Known User Preferences: {pref_dict}")
 

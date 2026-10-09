@@ -92,12 +92,9 @@ class SettingsDialog(QDialog):
         # 3. Preferred TTS Voice
         grid.addWidget(QLabel("TTS Voice:"), 2, 0)
         self.combo_voice = QComboBox()
-        self.combo_voice.addItems([
-            "en-GB-RyanNeural",
-            "en-US-JennyNeural",
-            "en-US-GuyNeural",
-            "en-AU-NatNeural",
-        ])
+        from denver.audio.voices import list_available_voices
+        voice_ids = [v.voice_id for v in list_available_voices()]
+        self.combo_voice.addItems(voice_ids)
         self.combo_voice.setCurrentText(self._settings.tts_voice)
         grid.addWidget(self.combo_voice, 2, 1)
 

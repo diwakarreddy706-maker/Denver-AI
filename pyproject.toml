@@ -10,8 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-    { name = "Denver AI Team" }
+    { name = "Diwakar Reddy (Denver AI Team)" }
 ]
+
 keywords = ["denver", "ai-assistant", "voice", "desktop-automation", "windows", "local-first"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -55,3 +56,12 @@ pythonpath = ["src"]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = [
+    "src",
+    "C:/Users/diwak/AppData/Local/Programs/Python/Python314/Lib/site-packages",
+]
+pythonPath = "C:/Users/diwak/AppData/Local/Programs/Python/Python314/python.exe"
+

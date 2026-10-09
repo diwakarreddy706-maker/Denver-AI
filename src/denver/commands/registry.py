@@ -68,6 +68,10 @@ class ActionRegistry:
             return [a for a in self._actions.values() if a.category == category]
         return list(self._actions.values())
 
+    def list_by_category(self, category: CommandCategory) -> list[ActionDefinition]:
+        """List registered action definitions filtered by category."""
+        return self.list_actions(category=category)
+
     def enable_action(self, name: str) -> bool:
         """Enable an action."""
         action = self.get(name)

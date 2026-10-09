@@ -171,6 +171,12 @@ class GroqWhisperSTTProvider(SpeechToTextProvider):
         body.append(b'Content-Disposition: form-data; name="language"\r\n\r\n')
         body.append(self.language.encode("utf-8") + b"\r\n")
 
+        # Context prompt guiding Whisper on Denver domain vocabulary
+        prompt_text = "Denver AI assistant. Commands: mailbox, email, check mail, inbox, read recent emails, summarize mail, WhatsApp, volume, windows, apps."
+        body.append(f"--{boundary}\r\n".encode("utf-8"))
+        body.append(b'Content-Disposition: form-data; name="prompt"\r\n\r\n')
+        body.append(prompt_text.encode("utf-8") + b"\r\n")
+
         body.append(f"--{boundary}\r\n".encode("utf-8"))
         body.append(b'Content-Disposition: form-data; name="file"; filename="speech.wav"\r\n')
         body.append(b"Content-Type: audio/wav\r\n\r\n")

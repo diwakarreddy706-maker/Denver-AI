@@ -47,10 +47,14 @@ class ClipboardController:
             self._last_copied_text = clean
             length = len(clean)
 
+            # Redact any credentials or secrets before voice output or logging
+            from denver.security.redactor import SecretRedactor
+            clean_for_speech = SecretRedactor.mask_text(clean)
+
             if length > max_speech_chars:
-                spoken = f"Your clipboard has {length} characters. Here is the first part: {clean[:max_speech_chars]}..."
+                spoken = f"Your clipboard has {length} characters. Here is the first part: {clean_for_speech[:max_speech_chars]}..."
             else:
-                spoken = clean
+                spoken = clean_for_speech
 
             return AutomationResult(
                 success=True,

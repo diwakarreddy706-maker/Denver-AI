@@ -16,6 +16,21 @@ logger = get_logger("database")
 T = TypeVar("T")
 
 
+def sanitize_fts_query(query: str) -> str:
+    """Sanitize user search input for SQLite FTS5 MATCH queries.
+
+    Transforms raw user search queries into safe prefix-matched FTS5 expressions.
+    Double-quotes individual tokens to prevent collision with FTS5 operators (AND, OR, NOT).
+    """
+    if not query:
+        return ""
+    import re
+    tokens = re.findall(r"\w+", query)
+    if not tokens:
+        return ""
+    return " ".join(f'"{t}"*' for t in tokens)
+
+
 class DenverDatabase:
     """Manages SQLite connection lifecycle, pragmas, migrations, and async execution."""
 

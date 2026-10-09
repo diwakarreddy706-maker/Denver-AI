@@ -389,6 +389,177 @@ def _apply_v6(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v7(conn: sqlite3.Connection) -> None:
+    """Apply Pillar 3 Evolving Memory & Personalization: user corrections and learned habits."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS user_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern TEXT NOT NULL,
+            correction TEXT NOT NULL,
+            target_domain TEXT DEFAULT 'general',
+            priority INTEGER DEFAULT 10,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS learned_habits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            habit_key TEXT NOT NULL UNIQUE,
+            habit_value TEXT NOT NULL,
+            frequency INTEGER DEFAULT 1,
+            confidence REAL DEFAULT 0.5,
+            last_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_corrections_active ON user_corrections(is_active);
+        CREATE INDEX IF NOT EXISTS idx_habits_category ON learned_habits(category);
+        """
+    )
+
+
+def _apply_v8(conn: sqlite3.Connection) -> None:
+    """Step 2: Calendar & Meeting Scheduler Integration (calendar_events table)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            start_time TIMESTAMP NOT NULL,
+            end_time TIMESTAMP,
+            location TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            attendees TEXT DEFAULT '[]',
+            is_all_day BOOLEAN DEFAULT 0,
+            reminder_minutes INTEGER DEFAULT 15,
+            reminder_sent BOOLEAN DEFAULT 0,
+            source TEXT DEFAULT 'local',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_calendar_start ON calendar_events(start_time);
+        CREATE INDEX IF NOT EXISTS idx_calendar_title ON calendar_events(title);
+        """
+    )
+
+
+def _apply_v9(conn: sqlite3.Connection) -> None:
+    """Step 3: Local Document & PDF Semantic RAG (document_chunks table)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content_chunk TEXT NOT NULL,
+            embedding BLOB,
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_doc_chunks_doc_id ON document_chunks(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_doc_chunks_file_path ON document_chunks(file_path);
+        CREATE INDEX IF NOT EXISTS idx_doc_chunks_file_name ON document_chunks(file_name);
+        """
+    )
+
+
+def _apply_v10(conn: sqlite3.Connection) -> None:
+    """Step 4: True FTS5 Search for notes, document_chunks & memory ranking."""
+    try:
+        # 1. Notes FTS5 virtual table and triggers
+        conn.executescript(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+                title,
+                content,
+                tags,
+                content=notes,
+                content_rowid=id
+            );
+
+            CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+                INSERT INTO notes_fts(rowid, title, content, tags)
+                VALUES (new.id, COALESCE(new.title, ''), COALESCE(new.content, ''), COALESCE(new.tags, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+                INSERT INTO notes_fts(notes_fts, rowid, title, content, tags)
+                VALUES('delete', old.id, COALESCE(old.title, ''), COALESCE(old.content, ''), COALESCE(old.tags, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
+                INSERT INTO notes_fts(notes_fts, rowid, title, content, tags)
+                VALUES('delete', old.id, COALESCE(old.title, ''), COALESCE(old.content, ''), COALESCE(old.tags, ''));
+                INSERT INTO notes_fts(rowid, title, content, tags)
+                VALUES (new.id, COALESCE(new.title, ''), COALESCE(new.content, ''), COALESCE(new.tags, ''));
+            END;
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO notes_fts(rowid, title, content, tags)
+            SELECT id, COALESCE(title, ''), COALESCE(content, ''), COALESCE(tags, '') FROM notes;
+            """
+        )
+
+        # 2. Document Chunks FTS5 virtual table and triggers (if document_chunks exists)
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_chunks';")
+        if cursor.fetchone():
+            conn.executescript(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5(
+                    file_name,
+                    content_chunk,
+                    content=document_chunks,
+                    content_rowid=id
+                );
+
+                CREATE TRIGGER IF NOT EXISTS doc_chunks_ai AFTER INSERT ON document_chunks BEGIN
+                    INSERT INTO document_chunks_fts(rowid, file_name, content_chunk)
+                    VALUES (new.id, COALESCE(new.file_name, ''), COALESCE(new.content_chunk, ''));
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS doc_chunks_ad AFTER DELETE ON document_chunks BEGIN
+                    INSERT INTO document_chunks_fts(document_chunks_fts, rowid, file_name, content_chunk)
+                    VALUES('delete', old.id, COALESCE(old.file_name, ''), COALESCE(old.content_chunk, ''));
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS doc_chunks_au AFTER UPDATE ON document_chunks BEGIN
+                    INSERT INTO document_chunks_fts(document_chunks_fts, rowid, file_name, content_chunk)
+                    VALUES('delete', old.id, COALESCE(old.file_name, ''), COALESCE(old.content_chunk, ''));
+                    INSERT INTO document_chunks_fts(rowid, file_name, content_chunk)
+                    VALUES (new.id, COALESCE(new.file_name, ''), COALESCE(new.content_chunk, ''));
+                END;
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO document_chunks_fts(rowid, file_name, content_chunk)
+                SELECT id, COALESCE(file_name, ''), COALESCE(content_chunk, '') FROM document_chunks;
+                """
+            )
+
+        # 3. Resync memory_items_fts with any missing rows
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_items_fts';")
+        if cursor.fetchone():
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_items_fts(rowid, content, key, category)
+                SELECT id, COALESCE(content, ''), COALESCE(key, ''), COALESCE(category, '') FROM memory_items;
+                """
+            )
+
+        logger.info("FTS5 full-text search indexes initialized for notes, document_chunks, and memory_items.")
+    except sqlite3.OperationalError as exc:
+        logger.warning("FTS5 migration v10 skipped (not supported in current SQLite): %s", exc)
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "Initial Denver schema: preferences, notes, tasks, habits, audit_log, memory_items, embeddings", _apply_v1),
     (2, "Phase 7 Advanced Intelligence: memory metadata, importance, confidence, TTL, FTS5 indexing", _apply_v2),
@@ -396,7 +567,12 @@ MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (4, "Phase 9 Task and Workflow Orchestration: orchestrated_tasks, task_plans, task_steps, executions, audit", _apply_v4),
     (5, "Phase 10: Saved Locations for Weather & Navigation", _apply_v5),
     (6, "Phase 11: Location Cache for Live Geolocation", _apply_v6),
+    (7, "Pillar 3: User Corrections and Learned Habits for Evolving Memory", _apply_v7),
+    (8, "Step 2: Calendar & Meeting Scheduler Integration", _apply_v8),
+    (9, "Step 3: Local Document & PDF Semantic RAG (document_chunks)", _apply_v9),
+    (10, "Step 4: True FTS5 Search for notes, document_chunks & memory ranking", _apply_v10),
 ]
+
 
 
 

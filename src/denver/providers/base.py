@@ -46,6 +46,17 @@ class AIProvider(ABC):
     async def generate(self, request: ProviderRequest) -> ProviderResponse:
         """Execute chat completion / inference request."""
 
+    async def stream_generate(self, request: ProviderRequest):
+        """Yield text tokens incrementally. Falls back to generate() if streaming is not overridden."""
+        import logging
+        logging.getLogger("provider_base").info(
+            "Provider '%s' does not implement native token streaming; falling back to whole-response generation.",
+            self.name,
+        )
+        response = await self.generate(request)
+        if response.text:
+            yield response.text
+
     @abstractmethod
     async def list_models(self) -> list[ModelInfo]:
         """List models available on this provider."""

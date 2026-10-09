@@ -319,3 +319,58 @@ class CachedLocation:
             "detected_at": self.detected_at.isoformat() if isinstance(self.detected_at, datetime) else str(self.detected_at),
         }
 
+
+@dataclass
+class UserCorrection:
+    """Represents a persisted user correction/override to Denver's past behaviors or actions."""
+
+    pattern: str
+    correction: str
+    target_domain: str = "general"
+    priority: int = 10
+    is_active: bool = True
+    created_at: datetime = field(default_factory=_utc_now)
+    updated_at: datetime = field(default_factory=_utc_now)
+    id: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "pattern": self.pattern,
+            "correction": self.correction,
+            "target_domain": self.target_domain,
+            "priority": self.priority,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else str(self.created_at),
+            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else str(self.updated_at),
+        }
+
+
+@dataclass
+class LearnedHabit:
+    """Represents an inferred recurring usage pattern or preference."""
+
+    category: str
+    habit_key: str
+    habit_value: str
+    frequency: int = 1
+    confidence: float = 0.5
+    last_observed_at: datetime = field(default_factory=_utc_now)
+    id: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "category": self.category,
+            "habit_key": self.habit_key,
+            "habit_value": self.habit_value,
+            "frequency": self.frequency,
+            "confidence": round(self.confidence, 4),
+            "last_observed_at": (
+                self.last_observed_at.isoformat()
+                if isinstance(self.last_observed_at, datetime)
+                else str(self.last_observed_at)
+            ),
+        }
+
+

@@ -7,11 +7,15 @@ from denver.ui.widgets.automation_status import AutomationBadge, AutomationStatu
 from denver.ui.widgets.command_input import CommandInputWidget
 from denver.ui.widgets.confirmation_dialog import SecurityConfirmationDialog
 from denver.ui.widgets.core_visualizer import DenverCoreVisualizer
+from denver.ui.widgets.cyber_hud import DenverCyberHUDWidget
 from denver.ui.widgets.home_dashboard import (
     AIStatusCard,
+    AudioBriefingCard,
     BottomBarWidget,
     DenverDashboardOverlay,
     DenverHomeTabWidget,
+    DownloadsCleanerCard,
+    GitDevCard,
     LiveClockCard,
     QuickActionsCard,
     QuickStatusCard,
@@ -41,16 +45,20 @@ __all__ = [
     "AIStatusCard",
     "ActivityItemCard",
     "ActivityPanelWidget",
+    "AudioBriefingCard",
     "AutomationBadge",
     "AutomationStatusWidget",
     "BottomBarWidget",
     "CommandInputWidget",
     "DenverAIOrbWidget",
     "DenverCoreVisualizer",
+    "DenverCyberHUDWidget",
     "DenverDashboardOverlay",
     "DenverHUDPanelStack",
     "DenverHomeTabWidget",
     "DenverSidebarWidget",
+    "DownloadsCleanerCard",
+    "GitDevCard",
     "HUDAIStatusCard",
     "HUDClockCard",
     "HUDQuickStatusCard",

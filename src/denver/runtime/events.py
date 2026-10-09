@@ -969,4 +969,48 @@ class SpotifyPlaybackChanged(DenverEvent):
     success: bool = True
 
 
+@dataclass(frozen=True)
+class ActiveWindowChanged(DenverEvent):
+    """Emitted when active desktop window or application focus changes."""
 
+    old_app: str = ""
+    new_app: str = ""
+    window_title: str = ""
+    category: str = "GENERAL"
+
+
+@dataclass(frozen=True)
+class EmailReceived(DenverEvent):
+    """Emitted when a new email message is received in the monitored inbox."""
+
+    uid: str = ""
+    sender: str = ""
+    sender_name: str = ""
+    subject: str = ""
+    date: str = ""
+    snippet: str = ""
+    has_attachments: bool = False
+
+
+@dataclass(frozen=True)
+class EmailSummarized(DenverEvent):
+    """Emitted when Denver has analyzed and summarized an incoming email."""
+
+    uid: str = ""
+    sender: str = ""
+    sender_name: str = ""
+    subject: str = ""
+    priority: str = "MEDIUM"
+    category: str = "GENERAL"
+    summary: str = ""
+    action_items: list[str] = field(default_factory=list)
+    suggested_reply: str | None = None
+
+
+@dataclass(frozen=True)
+class EmailMonitoringStateChanged(DenverEvent):
+    """Emitted when continuous email monitoring is started or stopped."""
+
+    is_active: bool = False
+    poll_interval_seconds: float = 180.0
+    server: str = ""

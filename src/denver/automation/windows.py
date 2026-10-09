@@ -96,6 +96,50 @@ class WindowsNativeAPI:
         self._user32.EnumWindows(cb, 0)
         return windows
 
+    def get_foreground_window(self) -> WindowInfo | None:
+        """Retrieve metadata for the currently focused foreground desktop window."""
+        if not self.is_available:
+            return None
+        try:
+            hwnd = self._user32.GetForegroundWindow()
+            if not hwnd or not self._user32.IsWindowVisible(hwnd):
+                return None
+
+            length = self._user32.GetWindowTextLengthW(hwnd)
+            title = ""
+            if length > 0:
+                buff = ctypes.create_unicode_buffer(length + 1)
+                self._user32.GetWindowTextW(hwnd, buff, length + 1)
+                title = buff.value.strip()
+
+            pid = wintypes.DWORD()
+            self._user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            proc_id = pid.value
+            proc_name = ""
+            if proc_id > 0:
+                try:
+                    import psutil
+                    proc = psutil.Process(proc_id)
+                    proc_name = proc.name()
+                except Exception:
+                    pass
+
+            is_min = bool(self._user32.IsIconic(hwnd))
+            is_max = bool(self._user32.IsZoomed(hwnd))
+
+            return WindowInfo(
+                handle=hwnd,
+                title=title,
+                process_id=proc_id,
+                process_name=proc_name,
+                is_visible=True,
+                is_minimized=is_min,
+                is_maximized=is_max,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Failed to retrieve foreground window: %s", exc)
+            return None
+
     def set_window_state(self, hwnd: int, command: int) -> bool:
         """Modify window display state (minimize, maximize, restore)."""
         if not self.is_available or not hwnd:

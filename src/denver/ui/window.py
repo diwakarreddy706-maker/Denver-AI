@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
     from PySide6.QtGui import (
         QBrush,
@@ -31,14 +31,42 @@ try:
         QLineEdit,
         QMainWindow,
         QPushButton,
+        QStackedWidget,
         QVBoxLayout,
         QWidget,
     )
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QMainWindow = object  # type: ignore
-    QWidget = object  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
+        from PySide6.QtGui import (
+            QBrush,
+            QColor,
+            QFont,
+            QIcon,
+            QLinearGradient,
+            QPainter,
+            QPainterPath,
+            QPen,
+        )
+        from PySide6.QtWidgets import (
+            QFrame,
+            QGraphicsDropShadowEffect,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QMainWindow,
+            QPushButton,
+            QStackedWidget,
+            QVBoxLayout,
+            QWidget,
+        )
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QMainWindow = object
+        QWidget = object
+        QStackedWidget = object
 
 import psutil
 
@@ -71,6 +99,7 @@ from denver.ui.theme import (
 )
 from denver.ui.widgets.ai_orb import DenverAIOrbWidget
 from denver.ui.widgets.confirmation_dialog import SecurityConfirmationDialog
+from denver.ui.widgets.cyber_hud import DenverCyberHUDWidget
 from denver.ui.widgets.hud_panels import DenverHUDPanelStack
 from denver.ui.widgets.settings_dialog import SettingsDialog
 from denver.ui.widgets.sidebar import DenverSidebarWidget
@@ -119,6 +148,7 @@ class TopNavBar(QWidget):
     minimize_requested = Signal()
     maximize_requested = Signal()
     close_requested = Signal()
+    mode_toggle_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -163,6 +193,30 @@ class TopNavBar(QWidget):
         layout.addWidget(dash_lbl)
 
         layout.addStretch(1)
+
+        # Center/Right: Mode switch button: Toggle between Cockpit Dashboard and Cyber HUD mode
+        self.mode_btn = QPushButton("⚡ Cyber HUD")
+        self.mode_btn.setToolTip("Toggle between Cockpit Dashboard and Cyber HUD mode")
+        self.mode_btn.setFixedHeight(26)
+        self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mode_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0, 229, 255, 0.12);
+                color: #00E5FF;
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                border-radius: 13px;
+                padding: 2px 12px;
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 229, 255, 0.25);
+                border: 1px solid #00E5FF;
+                color: #FFFFFF;
+            }}
+        """)
+        self.mode_btn.clicked.connect(self.mode_toggle_requested.emit)
+        layout.addWidget(self.mode_btn)
 
         # 2. Right: Notification Bell (with unread badge), Settings, Window Controls
         self.bell_btn = QPushButton("🔔")
@@ -402,6 +456,7 @@ class MainWindow(QMainWindow):
         self.top_bar.minimize_requested.connect(self.showMinimized)
         self.top_bar.maximize_requested.connect(self._toggle_maximize)
         self.top_bar.close_requested.connect(self.close)
+        self.top_bar.mode_toggle_requested.connect(self._toggle_view_mode)
         root_layout.addWidget(self.top_bar)
 
         # 2. MAIN 3-COLUMN BODY
@@ -413,6 +468,7 @@ class MainWindow(QMainWindow):
         # COLUMN A: Left Sidebar Navigation & Quick Actions
         self.sidebar = DenverSidebarWidget(controller=self.controller, parent=self)
         self.sidebar.action_triggered.connect(self._on_sidebar_action)
+        self.sidebar.nav_selected.connect(self._on_sidebar_nav_selected)
         body_layout.addWidget(self.sidebar)
 
         # COLUMN B: Center Stage (Greeting + Weather, Glowing AI Orb, Action Pills, Input Bar)
@@ -696,7 +752,20 @@ class MainWindow(QMainWindow):
         input_row.addWidget(self.send_btn)
 
         center_layout.addWidget(self.input_container)
-        body_layout.addWidget(center_container, stretch=1)
+
+        # Center Stage Stack: Switchable between Cockpit View (Index 0), Cyber HUD (Index 1), and Home Dashboard Cards (Index 2)
+        self.center_stack = QStackedWidget(self)
+        self.center_container = center_container
+        self.center_stack.addWidget(self.center_container)
+
+        self.cyber_hud_view = DenverCyberHUDWidget(controller=self.controller, parent=self)
+        self.center_stack.addWidget(self.cyber_hud_view)
+
+        from denver.ui.widgets.home_dashboard import DenverHomeTabWidget
+        self.home_cards_view = DenverHomeTabWidget(controller=self.controller, parent=self)
+        self.center_stack.addWidget(self.home_cards_view)
+
+        body_layout.addWidget(self.center_stack, stretch=1)
 
         # COLUMN C: Right Telemetry HUD Panels (Performance, Quick Status, Clock, AI Status)
         self.hud_stack = DenverHUDPanelStack(self)
@@ -826,8 +895,77 @@ class MainWindow(QMainWindow):
             self.controller.submit_command("Denver, hello")
 
     def _on_sidebar_action(self, action_name: str) -> None:
-        if self.controller:
-            self.controller.submit_command(f"Denver, {action_name}")
+        if not self.controller:
+            return
+        if self.sidebar and getattr(self.sidebar, "controller", None):
+            # Already dispatched to controller by DenverSidebarWidget
+            return
+        cmd_map = {
+            "new_task": "create task New Task",
+            "reminder": "create reminder in 10 minutes Check progress",
+            "calendar": "show calendar",
+            "notes": "create note Quick Note: Added from dashboard",
+        }
+        cmd = cmd_map.get(action_name, f"Denver, {action_name}")
+        self.controller.submit_command(cmd)
+
+    def switch_view_mode(self, mode: int | str) -> None:
+        """Switch between Cockpit View (0 / 'Home'), Cyber HUD View (1 / 'Cyber HUD'), and Home Dashboard Cards (2 / 'Tools')."""
+        if mode in ("Cyber HUD", "hud", 1):
+            self.center_stack.setCurrentIndex(1)
+            self.top_bar.mode_btn.setText("⌂ Cockpit View")
+            self._current_nav_name = "Cyber HUD"
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "set_active_nav"):
+                self.sidebar.set_active_nav("Cyber HUD")
+        elif mode in ("Tools", "cards", "dashboard", 2):
+            self.center_stack.setCurrentIndex(2)
+            self.top_bar.mode_btn.setText("⚡ Cyber HUD")
+            self._current_nav_name = "Tools"
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "set_active_nav"):
+                self.sidebar.set_active_nav("Tools")
+        elif mode in ("Files", "files"):
+            self.center_stack.setCurrentIndex(2)
+            self.top_bar.mode_btn.setText("⚡ Cyber HUD")
+            self._current_nav_name = "Files"
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "set_active_nav"):
+                self.sidebar.set_active_nav("Files")
+            if hasattr(self, "home_cards_view") and hasattr(self.home_cards_view, "cleaner_card"):
+                self.home_cards_view.scroll_area.verticalScrollBar().setValue(
+                    self.home_cards_view.cleaner_card.y()
+                )
+        else:
+            self.center_stack.setCurrentIndex(0)
+            self.top_bar.mode_btn.setText("⚡ Cyber HUD")
+            self._current_nav_name = "Home"
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "set_active_nav"):
+                self.sidebar.set_active_nav("Home")
+
+    def _toggle_view_mode(self) -> None:
+        curr = self.center_stack.currentIndex()
+        new_idx = 1 if curr == 0 else 0
+        self.switch_view_mode(new_idx)
+
+    def _on_sidebar_nav_selected(self, name: str) -> None:
+        logger.info("Sidebar navigation selected: %s", name)
+        if name == "Cyber HUD":
+            self.switch_view_mode(1)
+        elif name == "Home":
+            self.switch_view_mode(0)
+        elif name == "Assistant":
+            self.switch_view_mode(0)
+            if hasattr(self, "input_edit"):
+                self.input_edit.setFocus()
+        elif name == "Files":
+            self.switch_view_mode("Files")
+            if self.controller:
+                self.controller.submit_command("Denver, check recent project files")
+        elif name == "Tools":
+            self.switch_view_mode(2)
+        elif name == "Settings":
+            self._open_settings()
+            prev_name = getattr(self, "_current_nav_name", "Home")
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "set_active_nav"):
+                self.sidebar.set_active_nav(prev_name)
 
     def _toggle_maximize(self) -> None:
         if self.isMaximized():
@@ -836,7 +974,14 @@ class MainWindow(QMainWindow):
             self.showMaximized()
 
     def _bind_signals(self) -> None:
-        if not self.controller or not hasattr(self.controller, "bridge") or not self.controller.bridge:
+        if not self.controller:
+            return
+
+        # Ensure UIController is bound to backend EventBus
+        if hasattr(self.controller, "bind_event_bus"):
+            self.controller.bind_event_bus()
+
+        if not hasattr(self.controller, "bridge") or not self.controller.bridge:
             return
 
         bridge = self.controller.bridge
@@ -857,23 +1002,35 @@ class MainWindow(QMainWindow):
         cpu = getattr(state, "cpu_percent", None)
         ram = getattr(state, "ram_percent", None)
         self.perf_card.update_telemetry(cpu=cpu, mem=ram)
+        if hasattr(self, "cyber_hud_view") and self.cyber_hud_view:
+            self.cyber_hud_view.update_telemetry(cpu_pct=cpu, mem_pct=ram)
 
     def _on_state_changed(self, new_state: DenverState, reason: str = "") -> None:
         self.ai_status_card.update_status(new_state)
         self.ai_orb.set_state(new_state)
         self.bottom_bar.set_state(new_state)
+        if hasattr(self, "cyber_hud_view") and self.cyber_hud_view:
+            self.cyber_hud_view.set_state(new_state)
 
-    def _on_voice_state_changed(self, listening: bool) -> None:
-        state = DenverState.LISTENING if listening else DenverState.STANDBY
+    def _on_voice_state_changed(self, state_text: str = "STANDBY", active: bool = False, available: bool = False, *args: Any) -> None:
+        state = DenverState.LISTENING if active or state_text == "LISTENING" else DenverState.STANDBY
         self.ai_status_card.update_status(state)
         self.ai_orb.set_state(state)
         self.bottom_bar.set_state(state)
+        if hasattr(self, "cyber_hud_view") and self.cyber_hud_view:
+            self.cyber_hud_view.set_state(state)
 
     def _on_activity_added(self, item: Any) -> None:
         latency_ms = getattr(item, "latency_ms", 0.0) or 0.0
         latency_s = latency_ms / 1000.0
         state = self.controller.state.current_state if self.controller else DenverState.STANDBY
         self.ai_status_card.update_status(state=state, latency_s=latency_s)
+        if hasattr(self, "cyber_hud_view") and self.cyber_hud_view:
+            action = getattr(item, "action_name", "") or "action"
+            success = getattr(item, "success", True)
+            self.cyber_hud_view.add_activity_event(f"{action} {'completed' if success else 'failed'}")
+            if latency_ms:
+                self.cyber_hud_view.update_telemetry(latency_ms=latency_ms)
 
         resp_text = getattr(item, "response_text", "")
         cmd_text = getattr(item, "command_text", "")
@@ -894,7 +1051,13 @@ class MainWindow(QMainWindow):
                 self.controller.submit_command(f"Denver, cancel {token}")
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(parent=self)
+        settings = None
+        if self.controller and hasattr(self.controller, "app") and self.controller.app:
+            settings = getattr(self.controller.app, "settings", None)
+        if not settings:
+            from denver.config.settings import get_settings
+            settings = get_settings()
+        dialog = SettingsDialog(settings=settings, parent=self)
         dialog.exec()
 
     def keyPressEvent(self, event: Any) -> None:

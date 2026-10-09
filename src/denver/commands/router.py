@@ -361,8 +361,274 @@ class IntentRouter:
             re.IGNORECASE,
         )
 
+        # 30. Self-Model & Capability Introspection
+        self._capabilities_re = re.compile(
+            r"^(?:what\s+(?:can\s+you\s+do|are\s+your\s+capabilities|are\s+your\s+tools|actions\s+can\s+you\s+perform)|"
+            r"list\s+(?:your\s+)?(?:capabilities|tools|actions)|"
+            r"show\s+(?:your\s+)?capabilities|"
+            r"what\s+(?:ai\s+)?model\s+(?:are\s+you\s+using|is\s+active|are\s+you\s+running)|"
+            r"what\s+(?:ai\s+)?provider\s+(?:are\s+you\s+using|is\s+active))$",
+            re.IGNORECASE,
+        )
 
+        # 31. Continuous Desktop Observer & Active Window
+        self._active_window_re = re.compile(
+            r"^(?:(?:what(?:'s|\s+is)\s+(?:the\s+)?(?:active|current|focused)\s+(?:window|app|application))|"
+            r"(?:what\s+am\s+i\s+(?:looking\s+at|working\s+on|doing))|"
+            r"(?:what\s+app\s+is\s+(?:active|focused|open))|"
+            r"(?:(?:which|what)\s+window\s+is\s+(?:active|open|focused))|"
+            r"(?:(?:current|active)\s+(?:window|application|app)))$",
+            re.IGNORECASE,
+        )
 
+        # 32. Email Automation & Continuous Inbox Monitoring
+        self._email_check_re = re.compile(
+            r"^(?:(?:check|read|fetch|get|inspect|show|view|open)\s+(?:my\s+)?(?:unread\s+|new\s+|recent\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box)|"
+            r"(?:do\s+i\s+have\s+(?:any\s+)?(?:new\s+|unread\s+|recent\s+)?(?:emails?|mails?))|"
+            r"(?:any\s+(?:new|unread|recent)\s+(?:emails?|mails?))|"
+            r"(?:check\s+(?:my\s+)?(?:inbox|mailbox|mail\s+box))|"
+            r"(?:(?:my\s+)?(?:mailbox|mail\s+box|inbox))|"
+            r"(?:(?:new|unread|recent)\s+(?:emails?|mails?))|"
+            r"(?:emails?|mails?)|"
+            r"(?:mail\s+id|mailid)|"
+            r"(?:open\s+(?:my\s+)?(?:mail|email|mailbox|inbox)))$",
+            re.IGNORECASE,
+        )
+        self._email_read_latest_re = re.compile(
+            r"^(?:(?:read|show|open|what(?:'s|\s+is)\s+(?:in\s+)?)(?:my\s+)?(?:latest|last|recent|newest)\s+(?:emails?|mails?|mailbox|inbox)|"
+            r"(?:read\s+(?:my\s+)?(?:latest|last|recent)\s+(?:emails?|mails?))|"
+            r"(?:what(?:'s|\s+is)?\s+(?:in|inside)\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box))|"
+            r"(?:what\s+is\s+inside\s+(?:my\s+)?(?:mail|mailbox|inbox))|"
+            r"(?:what(?:'s|\s+is)\s+(?:my\s+)?latest\s+(?:emails?|mails?))|"
+            r"(?:latest\s+(?:emails?|mails?)))$",
+            re.IGNORECASE,
+        )
+        self._email_summarize_re = re.compile(
+            r"^(?:(?:summarize|give\s+me\s+a\s+summary\s+of|give\s+summary\s+of|summary\s+of)\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box)|"
+            r"(?:email\s+summary)|"
+            r"(?:inbox\s+summary)|"
+            r"(?:mailbox\s+summary)|"
+            r"(?:summarize\s+(?:my\s+)?(?:inbox|mailbox|mail\s+box)))$",
+            re.IGNORECASE,
+        )
+        self._email_monitor_start_re = re.compile(
+            r"^(?:(?:start|enable|turn\s+on|activate|begin)\s+(?:email\s+monitoring|mail\s+monitoring|email\s+watcher|mail\s+watcher|continuous\s+email\s+check)|"
+            r"(?:monitor\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box))|"
+            r"(?:watch\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box)))$",
+            re.IGNORECASE,
+        )
+        self._email_monitor_stop_re = re.compile(
+            r"^(?:(?:stop|disable|turn\s+off|deactivate|pause)\s+(?:email\s+monitoring|mail\s+monitoring|email\s+watcher|mail\s+watcher|continuous\s+email\s+check)|"
+            r"(?:stop\s+monitoring\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box))|"
+            r"(?:stop\s+watching\s+(?:my\s+)?(?:emails?|mails?|inbox|mailbox|mail\s+box)))$",
+            re.IGNORECASE,
+        )
+        self._email_monitor_status_re = re.compile(
+            r"^(?:(?:email\s+monitor\s+status|email\s+status|mail\s+status|inbox\s+status|mailbox\s+status|is\s+email\s+monitoring\s+(?:on|active|running)))$",
+            re.IGNORECASE,
+        )
+        self._email_draft_re = re.compile(
+            r"^(?:draft\s+(?:an?\s+)?email\s+to\s+([^\s,]+@[^\s,]+|[a-zA-Z0-9_.-]+)(?:\s+(?:about|with\s+subject)\s+['\"]?(.+?)['\"]?)?\s+(?:saying|body|message)\s+['\"]?(.+?)['\"]?|"
+            r"create\s+email\s+draft\s+to\s+([^\s,]+@[^\s,]+|[a-zA-Z0-9_.-]+)\s+['\"]?(.+?)['\"]?)$",
+            re.IGNORECASE,
+        )
+        self._email_send_re = re.compile(
+            r"^(?:send\s+(?:an?\s+)?email\s+to\s+([^\s,]+@[^\s,]+|[a-zA-Z0-9_.-]+)(?:\s+(?:about|with\s+subject)\s+['\"]?(.+?)['\"]?)?\s+(?:saying|body|message)\s+['\"]?(.+?)['\"]?|"
+            r"send\s+email\s+to\s+([^\s,]+@[^\s,]+|[a-zA-Z0-9_.-]+)\s+['\"]?(.+?)['\"]?)$",
+            re.IGNORECASE,
+        )
+        self._email_reply_re = re.compile(
+            r"^(?:reply\s+(?:to\s+)?(?:the\s+)?(?:latest\s+|recent\s+)?emails?(?:\s+(?:saying|message|with)\s+['\"]?(.+?)['\"]?)?|"
+            r"reply\s+to\s+email\s+([a-zA-Z0-9_-]+)\s+(?:saying|message)\s+['\"]?(.+?)['\"]?)$",
+            re.IGNORECASE,
+        )
+
+        # 8.12b. Calendar & Meeting Scheduling (Step 2)
+        self._calendar_schedule_re = re.compile(
+            r"^(?:(?:(?:show|view|open|get|check)\s+(?:my\s+)?|what(?:'s|\s+is)\s+(?:on\s+)?(?:my\s+)?)(?:calendar|schedule|agenda)(?:\s+(?:for\s+)?(today|tomorrow|yesterday|[a-zA-Z]+))?|"
+            r"(?:what\s+is\s+my\s+schedule(?:\s+for\s+today|\s+today)?)|"
+            r"(?:today(?:'s)?\s+(?:schedule|calendar|agenda))|"
+            r"(?:calendar|schedule|agenda))$",
+            re.IGNORECASE,
+        )
+        self._calendar_next_meeting_re = re.compile(
+            r"^(?:(?:what(?:'s|\s+is)\s+(?:my\s+)?next\s+(?:meeting|appointment|event|call))|"
+            r"(?:next\s+(?:meeting|appointment|event|call))|"
+            r"(?:upcoming\s+(?:meetings?|appointments?|events?|calls?))|"
+            r"(?:what\s+meetings?\s+(?:do\s+i\s+have|are\s+scheduled))|"
+            r"(?:when\s+is\s+my\s+next\s+meeting))$",
+            re.IGNORECASE,
+        )
+        self._calendar_create_re = re.compile(
+            r"^(?:(?:schedule|create|add|new)\s+(?:a\s+)?(?:meeting|calendar\s+event|event|appointment)\s+(?:called\s+|titled\s+)?['\"]?(.+?)['\"]?\s+(?:on\s+|at\s+)(.+)|"
+            r"(?:schedule\s+(?:meeting|event)\s+(.+)))$",
+            re.IGNORECASE,
+        )
+        self._calendar_delete_re = re.compile(
+            r"^(?:(?:delete|remove|cancel)\s+(?:calendar\s+event|meeting|event)\s+(.+))$",
+            re.IGNORECASE,
+        )
+        self._calendar_search_re = re.compile(
+            r"^(?:(?:search\s+(?:calendar|meetings?|events?)\s+(?:for\s+)?|find\s+(?:calendar\s+events?|meetings?)\s+(?:for\s+)?)(.+))$",
+            re.IGNORECASE,
+        )
+
+        # 8.12c. Local Document & PDF Semantic RAG (Step 3)
+        self._doc_index_re = re.compile(
+            r"^(?:(?:index\s+(?:document|file|pdf|doc)|read\s+and\s+index|add\s+(?:document|file|pdf))\s+(.+))$",
+            re.IGNORECASE,
+        )
+        self._doc_search_re = re.compile(
+            r"^(?:(?:search\s+(?:in\s+)?(?:documents?|files?|pdfs?)\s+(?:for\s+)?|find\s+in\s+(?:documents?|files?|pdfs?)\s+)(.+))$",
+            re.IGNORECASE,
+        )
+        self._doc_ask_re = re.compile(
+            r"^(?:(?:ask\s+(?:documents?|files?|pdfs?)\s+|query\s+(?:documents?|files?|pdfs?)\s+(?:about\s+)?|what\s+do(?:es)?\s+(?:the\s+)?documents?\s+say\s+about\s+)(.+))$",
+            re.IGNORECASE,
+        )
+        self._doc_list_re = re.compile(
+            r"^(?:(?:list|show|get)\s+(?:indexed\s+)?(?:documents?|files?|pdfs?)|indexed\s+(?:documents?|files?|pdfs?))$",
+            re.IGNORECASE,
+        )
+        self._doc_delete_re = re.compile(
+            r"^(?:(?:delete|remove)\s+(?:indexed\s+)?(?:document|file|pdf)\s+(.+))$",
+            re.IGNORECASE,
+        )
+
+        # 8.12d. Spoken Voice Profile Selector (Step 4)
+        self._voice_switch_re = re.compile(
+            r"^(?:(?:switch|change|set|use)\s+(?:the\s+)?(?:spoken\s+|tts\s+)?voice\s+(?:to\s+)?(?!speed|pitch|rate)(.+)|(?:use|set)\s+(?!speed|pitch|rate)(.+?)\s+voice)$",
+            re.IGNORECASE,
+        )
+        self._voice_list_re = re.compile(
+            r"^(?:(?:list|show|get|what\s+are\s+(?:the\s+)?)\s*(?:available\s+)?(?:spoken\s+|tts\s+)?voices|voices|available\s+voices)$",
+            re.IGNORECASE,
+        )
+        self._voice_speed_re = re.compile(
+            r"^(?:(?:set|change)\s+(?:voice\s+|speech\s+)?(?:speed|rate)\s+(?:to\s+)?(.+)|make\s+(?:the\s+)?voice\s+(faster|slower)|(?:speak|talk)\s+(faster|slower|quickly))$",
+            re.IGNORECASE,
+        )
+        self._voice_pitch_re = re.compile(
+            r"^(?:(?:set|change)\s+(?:voice\s+)?pitch\s+(?:to\s+)?(.+)|make\s+(?:the\s+)?voice\s+(deeper|higher|lower))$",
+            re.IGNORECASE,
+        )
+        self._voice_preview_re = re.compile(
+            r"^(?:(?:preview|test|sample)\s+(?:the\s+)?(?:spoken\s+|tts\s+)?voice(?:\s+(.+))?|voice\s+preview)$",
+            re.IGNORECASE,
+        )
+        self._voice_settings_re = re.compile(
+            r"^(?:(?:what(?:'s|\s+is)\s+(?:the\s+|my\s+)?(?:current\s+)?(?:voice|spoken\s+voice|voice\s+setting|voice\s+profile))|(?:show|get)\s+voice\s+settings)$",
+            re.IGNORECASE,
+        )
+
+        # 8.12e File System Assistant & Downloads Organizer (Step 5)
+        self._files_organize_re = re.compile(
+            r"^(?:(?:(dry\s*run)\s+)?(?:organize|sort|tidy)\s+(?:my\s+)?(?:downloads(?:\s+folder|\s+dir)?|files(?:\s+in\s+(.+?))?|folder\s+(.+?)|dir\s+(.+?)|directory\s+(.+?))(?:\s+(dry\s*run))?|"
+            r"(?:clean\s+up\s+(?:my\s+)?downloads(?:\s+folder|\s+dir)?)|"
+            r"(?:(?:(dry\s*run)\s+)?organize\s+([A-Za-z]:[\\/].+?)(?:\s+(dry\s*run))?))$",
+            re.IGNORECASE,
+        )
+        self._files_large_re = re.compile(
+            r"^(?:(?:find|show|list|scan\s+for|get)\s+(?:the\s+)?large\s+files(?:\s+(?:in|under)\s+(.+?))?(?:\s+(?:larger\s+than|over|>|min(?:imum)?)\s+(\d+(?:\.\d+)?)\s*(?:mb|gb|m|g))?|"
+            r"(?:find|show|list)\s+files\s+(?:larger\s+than|over|>)\s+(\d+(?:\.\d+)?)\s*(?:mb|gb|m|g)(?:\s+(?:in|under)\s+(.+?))?)$",
+            re.IGNORECASE,
+        )
+        self._files_dups_re = re.compile(
+            r"^(?:(?:find|show|list|scan\s+for|check\s+for|detect)\s+(?:all\s+)?(?:duplicate\s+files|duplicates)(?:\s+(?:in|under)\s+(.+?))?)$",
+            re.IGNORECASE,
+        )
+        self._files_temp_re = re.compile(
+            r"^(?:(?:clean|clear|delete|remove|purge)\s+(?:all\s+)?(?:temporary|temp|scratch)\s+files(?:\s+(?:in|under)\s+(.+?))?|"
+            r"(?:clean|clear)\s+temp(?:\s+(?:in|under)\s+(.+?))?)$",
+            re.IGNORECASE,
+        )
+        self._files_undo_re = re.compile(
+            r"^(?:undo\s+(?:last\s+)?(?:file\s+)?(?:organization|organize)|revert\s+(?:last\s+)?(?:file\s+)?organization|undo\s+downloads\s+organization)$",
+            re.IGNORECASE,
+        )
+
+        # 8.12f Local Git & Dev Workflow Actions (Step 6)
+        self._git_status_re = re.compile(
+            r"^(?:(?:check|show|get|what(?:'s|\s+is)\s+my)?\s*git\s+status(?:\s+(?:in|for)\s+(.+))?|what\s+changed\s+in\s+git)$",
+            re.IGNORECASE,
+        )
+        self._git_branches_re = re.compile(
+            r"^(?:(?:show|list|get|what\s+are\s+the\s+)?git\s+branches(?:\s+(?:in|for)\s+(.+))?|what\s+branch\s+am\s+i\s+on)$",
+            re.IGNORECASE,
+        )
+        self._git_log_re = re.compile(
+            r"^(?:(?:show|get|list\s+)?git\s+(?:recent\s+)?(?:log|commits)(?:\s+(?:in|for)\s+(.+?))?(?:\s+(?:limit\s+)?(\d+))?|"
+            r"what\s+were\s+the\s+last\s+(\d+)\s+commits|"
+            r"git\s+log\s+(?:-n\s*)?(\d+))$",
+            re.IGNORECASE,
+        )
+        self._git_diff_re = re.compile(
+            r"^(?:(?:show|get\s+)?git\s+(staged\s+)?diff(?:\s+(?:in|for)\s+(.+))?|git\s+diff\s+summary|git\s+changes)$",
+            re.IGNORECASE,
+        )
+        self._git_create_branch_re = re.compile(
+            r"^(?:(?:git\s+)?create\s+(?:new\s+)?(?:git\s+)?branch\s+([a-zA-Z0-9_\-\./]+)|git\s+checkout\s+-b\s+([a-zA-Z0-9_\-\./]+))$",
+            re.IGNORECASE,
+        )
+        self._git_switch_branch_re = re.compile(
+            r"^(?:git\s+switch\s+(?:branch\s+|to\s+)?([a-zA-Z0-9_\-\./]+)|git\s+checkout\s+([a-zA-Z0-9_\-\./]+)|checkout\s+branch\s+([a-zA-Z0-9_\-\./]+))$",
+            re.IGNORECASE,
+        )
+        self._git_commit_re = re.compile(
+            r"^(?:git\s+commit\s+(?:-a\s+)?(?:-m\s+)?['\"]?(.+?)['\"]?|commit\s+(all\s+)?changes\s+with\s+message\s+['\"]?(.+?)['\"]?)$",
+            re.IGNORECASE,
+        )
+
+        # 8.12g Proactive Morning & Evening Audio Briefings (Step 7)
+        self._morning_audio_briefing_re = re.compile(
+            r"^(?:(?:audio|listen\s+to|play|read|speak|give\s+me\s+(?:my\s+)?)\s*morning\s+briefing|"
+            r"morning\s+audio\s+briefing|"
+            r"audio\s+(?:daily\s+)?briefing|"
+            r"proactive\s+morning\s+briefing)$",
+            re.IGNORECASE,
+        )
+        self._evening_audio_briefing_re = re.compile(
+            r"^(?:(?:audio|listen\s+to|play|read|speak|give\s+me\s+(?:my\s+)?|start\s+|get\s+|run\s+)?evening\s+(?:audio\s+)?briefing|"
+            r"evening\s+briefing|"
+            r"evening\s+audio\s+briefing|"
+            r"daily\s+wrap\s*up\s+briefing|"
+            r"evening\s+wrap\s*up|"
+            r"good\s+evening(?:\s+denver)?)$",
+            re.IGNORECASE,
+        )
+
+        # 8.13 Evolving Memory & Personalization (Pillar 3)
+        self._corrections_list_re = re.compile(
+            r"^(?:(?:what\s+corrections\s+(?:have\s+you\s+learned|do\s+you\s+know|are\s+saved))|"
+            r"(?:show\s+(?:my\s+|user\s+)?corrections)|"
+            r"(?:list\s+(?:my\s+|user\s+)?corrections)|"
+            r"(?:what\s+are\s+my\s+corrections)|"
+            r"(?:what\s+corrections\s+do\s+you\s+have))$",
+            re.IGNORECASE,
+        )
+        self._correction_clear_re = re.compile(
+            r"^(?:clear\s+correction|delete\s+correction|remove\s+correction|forget\s+correction)\s+(\d+)$",
+            re.IGNORECASE,
+        )
+        self._habits_list_re = re.compile(
+            r"^(?:(?:what\s+are\s+my\s+habits)|"
+            r"(?:what\s+habits\s+(?:have\s+you\s+learned|do\s+you\s+know))|"
+            r"(?:show\s+(?:my\s+)?(?:learned\s+)?habits)|"
+            r"(?:list\s+(?:my\s+)?(?:learned\s+)?habits)|"
+            r"(?:what\s+habits\s+do\s+you\s+have)|"
+            r"(?:my\s+habits))$",
+            re.IGNORECASE,
+        )
+
+        # 8.14 Metacognitive Loop (Pillar 4)
+        self._explain_plan_re = re.compile(
+            r"^(?:(?:explain\s+plan\s+(?:for\s+)?)|(?:plan\s+for\s+)|(?:show\s+plan\s+(?:for\s+)?))(.+)$",
+            re.IGNORECASE,
+        )
+        self._metacognitive_exec_re = re.compile(
+            r"^(?:(?:metacognitive\s+execute\s+)|(?:run\s+plan\s+(?:for\s+)?)|(?:verified\s+execute\s+)|(?:execute\s+with\s+verification\s+))(.+)$",
+            re.IGNORECASE,
+        )
 
 
 
@@ -1304,6 +1570,655 @@ class IntentRouter:
                 params={"provider": prov},
                 risk_level=CommandRiskLevel.LOW,
             )
+
+        # 8.10 Self-Model & Capability Introspection
+        if self._capabilities_re.match(text):
+            return CommandIntent(
+                intent_name="introspect_capabilities",
+                action_name="introspect_capabilities",
+                category=CommandCategory.SYSTEM,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.11 Desktop Observer & Active Window
+        if self._active_window_re.match(text):
+            return CommandIntent(
+                intent_name="get_active_window",
+                action_name="get_active_window",
+                category=CommandCategory.APPLICATION,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.12 Email Automation & Continuous Inbox Monitoring
+        if self._email_monitor_start_re.match(text):
+            return CommandIntent(
+                intent_name="start_email_monitor",
+                action_name="start_email_monitor",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        if self._email_monitor_stop_re.match(text):
+            return CommandIntent(
+                intent_name="stop_email_monitor",
+                action_name="stop_email_monitor",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        if self._email_monitor_status_re.match(text):
+            return CommandIntent(
+                intent_name="get_email_monitor_status",
+                action_name="get_email_monitor_status",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._email_read_latest_re.match(text):
+            return CommandIntent(
+                intent_name="read_latest_email",
+                action_name="read_latest_email",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._email_summarize_re.match(text):
+            return CommandIntent(
+                intent_name="summarize_emails",
+                action_name="summarize_emails",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"limit": 5},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._email_check_re.match(text):
+            return CommandIntent(
+                intent_name="check_emails",
+                action_name="check_emails",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"limit": 5},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._email_draft_re.match(text)
+        if m:
+            if m.group(1):
+                to_addr = m.group(1)
+                subj = m.group(2) or "Draft Message"
+                body = m.group(3) or ""
+            else:
+                to_addr = m.group(4)
+                subj = "Draft Message"
+                body = m.group(5)
+            return CommandIntent(
+                intent_name="draft_email",
+                action_name="draft_email",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"to": to_addr, "subject": subj, "body": body},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._email_send_re.match(text)
+        if m:
+            if m.group(1):
+                to_addr = m.group(1)
+                subj = m.group(2) or "Message from Denver"
+                body = m.group(3) or ""
+            else:
+                to_addr = m.group(4)
+                subj = "Message from Denver"
+                body = m.group(5)
+            return CommandIntent(
+                intent_name="send_email",
+                action_name="send_email",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"to": to_addr, "subject": subj, "body": body},
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+            )
+
+        m = self._email_reply_re.match(text)
+        if m:
+            if m.group(1) is not None:
+                body = m.group(1)
+                uid = None
+            elif m.group(2):
+                uid = m.group(2)
+                body = m.group(3)
+            else:
+                body = ""
+                uid = None
+            return CommandIntent(
+                intent_name="reply_to_email",
+                action_name="reply_to_email",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"body": body, "uid": uid},
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+            )
+
+        # 8.12b. Calendar & Meeting Scheduling (Step 2)
+        m = self._calendar_schedule_re.match(text)
+        if m:
+            target_date = m.group(1) if m.groups() and m.group(1) else "today"
+            return CommandIntent(
+                intent_name="get_today_schedule",
+                action_name="get_today_schedule",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"date": target_date},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._calendar_next_meeting_re.match(text):
+            return CommandIntent(
+                intent_name="get_next_meeting",
+                action_name="get_next_meeting",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._calendar_create_re.match(text)
+        if m:
+            if m.group(1) and m.group(2):
+                title = m.group(1).strip()
+                date_expr = m.group(2).strip()
+            else:
+                title = m.group(3).strip()
+                date_expr = "today at 10 AM"
+            return CommandIntent(
+                intent_name="create_calendar_event",
+                action_name="create_calendar_event",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"title": title, "date_expr": date_expr},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._calendar_delete_re.match(text)
+        if m:
+            raw_target = m.group(1).strip()
+            params: dict[str, Any] = {"event_id": int(raw_target)} if raw_target.isdigit() else {"title": raw_target}
+            return CommandIntent(
+                intent_name="delete_calendar_event",
+                action_name="delete_calendar_event",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        m = self._calendar_search_re.match(text)
+        if m:
+            query = m.group(1).strip()
+            return CommandIntent(
+                intent_name="search_calendar_events",
+                action_name="search_calendar_events",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"query": query},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.12c. Local Document & PDF Semantic RAG (Step 3)
+        m = self._doc_index_re.match(text)
+        if m:
+            path = m.group(1).strip().strip("'\"")
+            return CommandIntent(
+                intent_name="index_document",
+                action_name="index_document",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"path": path},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._doc_search_re.match(text)
+        if m:
+            query = m.group(1).strip()
+            return CommandIntent(
+                intent_name="search_documents",
+                action_name="search_documents",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"query": query},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._doc_ask_re.match(text)
+        if m:
+            query = m.group(1).strip()
+            return CommandIntent(
+                intent_name="ask_document",
+                action_name="ask_document",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"query": query},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._doc_list_re.match(text):
+            return CommandIntent(
+                intent_name="list_documents",
+                action_name="list_documents",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._doc_delete_re.match(text)
+        if m:
+            target = m.group(1).strip().strip("'\"")
+            return CommandIntent(
+                intent_name="delete_document",
+                action_name="delete_document",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"path": target},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        # 8.12d. Spoken Voice Profile Selector (Step 4)
+        m = self._voice_speed_re.match(text)
+        if m:
+            speed = (m.group(1) or m.group(2) or m.group(3)).strip()
+            return CommandIntent(
+                intent_name="set_voice_speed",
+                action_name="set_voice_speed",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"speed": speed},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._voice_pitch_re.match(text)
+        if m:
+            pitch = (m.group(1) or m.group(2)).strip()
+            return CommandIntent(
+                intent_name="set_voice_pitch",
+                action_name="set_voice_pitch",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"pitch": pitch},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._voice_switch_re.match(text)
+        if m:
+            target_voice = (m.group(1) or m.group(2)).strip()
+            return CommandIntent(
+                intent_name="switch_voice",
+                action_name="switch_voice",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"voice": target_voice},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._voice_list_re.match(text):
+            return CommandIntent(
+                intent_name="list_voices",
+                action_name="list_voices",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._voice_preview_re.match(text)
+        if m:
+            voice_spec = m.group(1).strip() if m.groups() and m.group(1) else None
+            return CommandIntent(
+                intent_name="preview_voice",
+                action_name="preview_voice",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"voice": voice_spec} if voice_spec else {},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._voice_settings_re.match(text):
+            return CommandIntent(
+                intent_name="get_voice_settings",
+                action_name="get_voice_settings",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.12e File System Assistant & Downloads Organizer (Step 5)
+        m = self._files_organize_re.match(text)
+        if m:
+            groups = m.groups()
+            dry_run = bool(
+                (len(groups) > 0 and groups[0])
+                or (len(groups) > 5 and groups[5])
+                or (len(groups) > 6 and groups[6])
+                or (len(groups) > 8 and groups[8])
+            )
+            target_path = None
+            for idx in (1, 2, 3, 4, 7):
+                if idx < len(groups) and groups[idx]:
+                    target_path = groups[idx].strip().strip("'\"")
+                    break
+            params: dict[str, Any] = {}
+            if target_path:
+                params["path"] = target_path
+            if dry_run:
+                params["dry_run"] = True
+            return CommandIntent(
+                intent_name="organize_downloads",
+                action_name="organize_downloads",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.LOW if not dry_run else CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._files_large_re.match(text)
+        if m:
+            path_val = None
+            size_val = None
+            if m.group(1):
+                path_val = m.group(1).strip().strip("'\"")
+            if m.group(2):
+                size_val = float(m.group(2))
+            elif m.group(3):
+                size_val = float(m.group(3))
+                if m.group(4):
+                    path_val = m.group(4).strip().strip("'\"")
+            params = {}
+            if path_val:
+                params["path"] = path_val
+            if size_val is not None:
+                params["min_size_mb"] = size_val
+            return CommandIntent(
+                intent_name="find_large_files",
+                action_name="find_large_files",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._files_dups_re.match(text)
+        if m:
+            target_path = m.group(1).strip().strip("'\"") if m.group(1) else None
+            params = {"path": target_path} if target_path else {}
+            return CommandIntent(
+                intent_name="find_duplicate_files",
+                action_name="find_duplicate_files",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._files_temp_re.match(text)
+        if m:
+            target_path = (m.group(1) or m.group(2)).strip().strip("'\"") if (m.group(1) or m.group(2)) else None
+            params = {"path": target_path} if target_path else {}
+            return CommandIntent(
+                intent_name="clean_temp_files",
+                action_name="clean_temp_files",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        if self._files_undo_re.match(text):
+            return CommandIntent(
+                intent_name="undo_file_organization",
+                action_name="undo_file_organization",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        # 8.12f Local Git & Dev Workflow Actions (Step 6)
+        m = self._git_status_re.match(text)
+        if m:
+            repo_path = m.group(1).strip().strip("'\"") if m.groups() and m.group(1) else None
+            params = {"repo_path": repo_path} if repo_path else {}
+            return CommandIntent(
+                intent_name="git_status",
+                action_name="git_status",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._git_branches_re.match(text)
+        if m:
+            repo_path = m.group(1).strip().strip("'\"") if m.groups() and m.group(1) else None
+            params = {"repo_path": repo_path} if repo_path else {}
+            return CommandIntent(
+                intent_name="git_branches",
+                action_name="git_branches",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._git_log_re.match(text)
+        if m:
+            repo_path = None
+            limit = 5
+            if m.group(1):
+                repo_path = m.group(1).strip().strip("'\"")
+            if m.group(2):
+                limit = int(m.group(2))
+            elif m.group(3):
+                limit = int(m.group(3))
+            elif m.group(4):
+                limit = int(m.group(4))
+            params_log: dict[str, Any] = {"limit": limit}
+            if repo_path:
+                params_log["repo_path"] = repo_path
+            return CommandIntent(
+                intent_name="git_log",
+                action_name="git_log",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params_log,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._git_diff_re.match(text)
+        if m:
+            staged = bool(m.group(1))
+            repo_path = m.group(2).strip().strip("'\"") if len(m.groups()) > 1 and m.group(2) else None
+            params_diff: dict[str, Any] = {"staged": staged}
+            if repo_path:
+                params_diff["repo_path"] = repo_path
+            return CommandIntent(
+                intent_name="git_diff",
+                action_name="git_diff",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params=params_diff,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._git_create_branch_re.match(text)
+        if m:
+            branch_name = (m.group(1) or m.group(2)).strip()
+            return CommandIntent(
+                intent_name="git_create_branch",
+                action_name="git_create_branch",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"branch": branch_name, "checkout": True},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        m = self._git_switch_branch_re.match(text)
+        if m:
+            branch_name = (m.group(1) or m.group(2) or m.group(3)).strip()
+            return CommandIntent(
+                intent_name="git_switch_branch",
+                action_name="git_switch_branch",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"branch": branch_name},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        m = self._git_commit_re.match(text)
+        if m:
+            commit_msg = (m.group(1) or m.group(3) or "").strip().strip("'\"")
+            stage_all = bool(m.group(2) or "-a" in text.lower())
+            return CommandIntent(
+                intent_name="git_commit",
+                action_name="git_commit",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"message": commit_msg, "stage_all": stage_all},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        # 8.12g Proactive Morning & Evening Audio Briefings (Step 7)
+        if self._morning_audio_briefing_re.match(text):
+            return CommandIntent(
+                intent_name="morning_briefing",
+                action_name="morning_briefing",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"audio": True},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        if self._evening_audio_briefing_re.match(text):
+            return CommandIntent(
+                intent_name="evening_briefing",
+                action_name="evening_briefing",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"audio": True},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.13 Evolving Memory & Personalization (Pillar 3)
+        if self._corrections_list_re.match(text):
+            return CommandIntent(
+                intent_name="list_corrections",
+                action_name="list_corrections",
+                category=CommandCategory.MEMORY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._correction_clear_re.match(text)
+        if m:
+            c_id = int(m.group(1))
+            return CommandIntent(
+                intent_name="clear_correction",
+                action_name="clear_correction",
+                category=CommandCategory.MEMORY,
+                confidence=1.0,
+                params={"correction_id": c_id},
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+            )
+
+        if self._habits_list_re.match(text):
+            return CommandIntent(
+                intent_name="list_habits",
+                action_name="list_habits",
+                category=CommandCategory.MEMORY,
+                confidence=1.0,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        # 8.14 Metacognitive Loop (Pillar 4)
+        m = self._explain_plan_re.match(text)
+        if m:
+            instruction = m.group(1).strip()
+            return CommandIntent(
+                intent_name="explain_plan",
+                action_name="explain_plan",
+                category=CommandCategory.UTILITY,
+                confidence=1.0,
+                params={"instruction": instruction},
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+            )
+
+        m = self._metacognitive_exec_re.match(text)
+        if m:
+            instruction = m.group(1).strip()
+            return CommandIntent(
+                intent_name="metacognitive_execute",
+                action_name="metacognitive_execute",
+                category=CommandCategory.TASK,
+                confidence=1.0,
+                params={"instruction": instruction},
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+            )
+
+
+
 
         # 9. Window Management Checks
         if self._win_desktop_re.match(text):

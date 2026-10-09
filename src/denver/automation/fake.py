@@ -120,6 +120,16 @@ class FakeWindowController(WindowManager):
             "desktop_shown": self.desktop_shown,
         }
 
+    def get_active_window(self) -> WindowInfo | None:
+        if self.focused_windows:
+            last = self.focused_windows[-1]
+            wins = self.find_windows(last)
+            if wins:
+                return wins[0]
+        if self.active_windows:
+            return self.active_windows[0]
+        return None
+
     def find_windows(self, query: str) -> list[WindowInfo]:
         q = query.strip().lower()
         return [w for w in self.active_windows if q in w.title.lower()]

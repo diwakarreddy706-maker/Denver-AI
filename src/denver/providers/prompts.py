@@ -24,9 +24,13 @@ def build_system_prompt(
     context_summary: str | None = None,
     available_tools: list[ToolDefinition] | None = None,
     is_cloud: bool = False,
+    self_state_summary: str | None = None,
 ) -> str:
-    """Construct full structured system prompt including memory context and tool descriptions."""
+    """Construct full structured system prompt including self-state model, memory context, and tool descriptions."""
     parts = [BASE_DENVER_PROMPT]
+
+    if self_state_summary and self_state_summary.strip():
+        parts.append("\n" + self_state_summary.strip())
 
     if context_summary and context_summary.strip():
         parts.append("\n" + context_summary.strip())

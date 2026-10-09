@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import Qt, Signal
     from PySide6.QtWidgets import (
         QFrame,
@@ -16,9 +16,25 @@ try:
         QWidget,
     )
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QWidget = object  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import Qt, Signal
+        from PySide6.QtWidgets import (
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+            QVBoxLayout,
+            QWidget,
+        )
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        Qt = None
+        Signal = lambda *args, **kwargs: None
+        QWidget = object
+
 
 from denver.logging.logger import get_logger
 from denver.ui.controller import UIController
@@ -69,6 +85,7 @@ class DenverSidebarWidget(QWidget):
         self.nav_btns: dict[str, QPushButton] = {}
         nav_items = [
             ("Home", "⌂", True),
+            ("Cyber HUD", "⚡", False),
             ("Assistant", "💬", False),
             ("Files", "📁", False),
             ("Tools", "⊞", False),
@@ -157,7 +174,8 @@ class DenverSidebarWidget(QWidget):
         btn.clicked.connect(lambda _, n=name: self._on_nav_clicked(n))
         return btn
 
-    def _on_nav_clicked(self, name: str) -> None:
+    def set_active_nav(self, name: str) -> None:
+        """Update active navigation button styling programmatically."""
         for n, b in self.nav_btns.items():
             is_active = (n == name)
             if is_active:
@@ -192,6 +210,9 @@ class DenverSidebarWidget(QWidget):
                         color: {TEXT_PRIMARY};
                     }}
                 """)
+
+    def _on_nav_clicked(self, name: str) -> None:
+        self.set_active_nav(name)
         self.nav_selected.emit(name)
 
     def _create_action_card(self, title: str, icon: str, gradient: str) -> QPushButton:

@@ -16,7 +16,7 @@ import os
 import socket
 import time
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     import psutil
@@ -24,7 +24,7 @@ try:
 except ImportError:
     _PSUTIL_AVAILABLE = False
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer, Signal
     from PySide6.QtGui import (
         QAction,
@@ -42,6 +42,7 @@ try:
     )
     from PySide6.QtWidgets import (
         QApplication,
+        QComboBox,
         QFrame,
         QGraphicsDropShadowEffect,
         QGridLayout,
@@ -57,12 +58,48 @@ try:
         QWidget,
     )
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QMainWindow = object  # type: ignore
-    QWidget = object  # type: ignore
-    QFrame = object  # type: ignore
-    Signal = lambda *args: None  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer, Signal
+        from PySide6.QtGui import (
+            QAction,
+            QBrush,
+            QColor,
+            QFont,
+            QIcon,
+            QKeySequence,
+            QLinearGradient,
+            QPainter,
+            QPainterPath,
+            QPen,
+            QRadialGradient,
+            QShortcut,
+        )
+        from PySide6.QtWidgets import (
+            QApplication,
+            QComboBox,
+            QFrame,
+            QGraphicsDropShadowEffect,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QMainWindow,
+            QProgressBar,
+            QPushButton,
+            QSizePolicy,
+            QSpacerItem,
+            QVBoxLayout,
+            QWidget,
+        )
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QMainWindow = object
+        QWidget = object
+        QFrame = object
+        QComboBox = object
+        Signal = lambda *args: None
 
 from denver import __version__, assistant_name, product_name
 from denver.logging.logger import get_logger
@@ -312,6 +349,7 @@ class WeatherCard(CyberCard):
             self._timeout_timer.start(8000)
 
         def _worker() -> None:
+            loop = None
             try:
                 from denver.automation.location import LocationService
                 from denver.automation.weather import WeatherService
@@ -326,6 +364,7 @@ class WeatherCard(CyberCard):
                 asyncio.set_event_loop(loop)
                 report = loop.run_until_complete(weather_service.get_current_weather("here"))
                 loop.close()
+                loop = None
 
                 if report and report.source != "error" and report.temp_c is not None:
                     city = report.city or "Local"
@@ -350,11 +389,16 @@ class WeatherCard(CyberCard):
                         self._bridge.failed.emit()
                     except RuntimeError:
                         pass
-            except Exception as exc:
-                logger.warning("Weather fetch encountered exception in worker thread: %s", exc)
+            except BaseException:
                 try:
                     self._bridge.failed.emit()
-                except RuntimeError:
+                except Exception:
+                    pass
+            finally:
+                try:
+                    if loop is not None and not loop.is_closed():
+                        loop.close()
+                except Exception:
                     pass
 
         import threading
@@ -735,9 +779,11 @@ class QuickActionsCard(CyberCard):
             self.controller.submit_command("create note Quick Note: Added from dashboard")
 
     def _on_calendar(self) -> None:
-        # TODO: Wire to Google Calendar / Outlook integration when backend calendar provider is implemented
-        logger.info("Quick action triggered: Calendar (Backend calendar handler is not yet implemented)")
+        logger.info("Quick action triggered: Calendar")
         self.action_triggered.emit("calendar_todo")
+        if self.controller:
+            self.controller.submit_command("show calendar")
+
 
 
 class SpotifyMediaCard(CyberCard):
@@ -952,7 +998,7 @@ class AIStatusCard(CyberCard):
 
     def update_status(self, state: DenverState | str, latency_s: float | None = None) -> None:
         """Update live status dot, response time, and refresh timestamp."""
-        state_str = state.value if isinstance(state, DenverState) else str(state)
+        state_str = state.value if isinstance(state, DenverState) else state
         is_online = state_str not in {"ERROR", "STOPPED"}
         dot_color = STATUS_SUCCESS if is_online else STATUS_DANGER
         self.status_dot.setText(f"● {state_str.capitalize()}")
@@ -962,6 +1008,428 @@ class AIStatusCard(CyberCard):
             self.latency_lbl.setText(f"{latency_s:.1f}s")
 
         self.updated_lbl.setText(datetime.now().strftime("%I:%M %p"))
+
+
+class AudioBriefingCard(CyberCard):
+    """Audio Briefing card providing Morning/Night selection, calendar & inbox metrics, and briefing playback."""
+
+    briefing_triggered = Signal(str)
+
+    def __init__(self, controller: UIController | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.controller = controller
+        self._briefing_mode: str = "morning"
+        self.setMinimumSize(260, 115)
+        self.setMaximumSize(420, 135)
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(3)
+
+        # Header Row: Icon + Title + Morning/Night Toggle Pill Buttons
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
+
+        self.icon_lbl = QLabel("🌅")
+        self.icon_lbl.setStyleSheet("font-size: 13px;")
+        header_row.addWidget(self.icon_lbl)
+
+        title_lbl = QLabel("Audio Briefing")
+        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+
+        self.btn_morning = QPushButton("🌅 Morning")
+        self.btn_morning.setFixedHeight(22)
+        self.btn_morning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_morning.setStyleSheet(self._mode_btn_style(active=True))
+        self.btn_morning.clicked.connect(self._select_morning)
+        header_row.addWidget(self.btn_morning)
+
+        self.btn_night = QPushButton("🌙 Night")
+        self.btn_night.setFixedHeight(22)
+        self.btn_night.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_night.setStyleSheet(self._mode_btn_style(active=False))
+        self.btn_night.clicked.connect(self._select_night)
+        header_row.addWidget(self.btn_night)
+
+        layout.addLayout(header_row)
+
+        # Counts Info Row (Calendar & Inbox)
+        self.counts_lbl = QLabel("📅 Checking schedule... • ✉️ Inbox ready")
+        self.counts_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; font-weight: 600;")
+        layout.addWidget(self.counts_lbl)
+
+        # Action Button Row
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+
+        self.play_btn = QPushButton("▶ Play Morning Briefing")
+        self.play_btn.setFixedHeight(26)
+        self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.play_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {GRADIENT_TEAL};
+                color: #FFFFFF;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 7px;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid #FFFFFF;
+                background: {GRADIENT_TEAL};
+            }}
+            QPushButton:pressed {{
+                background-color: {PRIMARY_BLUE};
+            }}
+        """)
+        self.play_btn.clicked.connect(self._on_play_briefing)
+        action_row.addWidget(self.play_btn)
+
+        layout.addLayout(action_row)
+        self.refresh_counts()
+
+    def _mode_btn_style(self, active: bool) -> str:
+        if active:
+            return f"""
+                QPushButton {{
+                    background: rgba(0, 229, 255, 0.22);
+                    color: #00E5FF;
+                    border: 1px solid #00E5FF;
+                    border-radius: 4px;
+                    font-size: 9px;
+                    font-weight: 700;
+                    padding: 2px 6px;
+                }}
+            """
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {TEXT_MUTED};
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                font-size: 9px;
+                font-weight: 500;
+                padding: 2px 6px;
+            }}
+            QPushButton:hover {{
+                color: {TEXT_PRIMARY};
+                border: 1px solid rgba(255, 255, 255, 0.3);
+            }}
+        """
+
+    def _select_morning(self) -> None:
+        self._briefing_mode = "morning"
+        self.icon_lbl.setText("🌅")
+        self.btn_morning.setStyleSheet(self._mode_btn_style(active=True))
+        self.btn_night.setStyleSheet(self._mode_btn_style(active=False))
+        self.play_btn.setText("▶ Play Morning Briefing")
+
+    def _select_night(self) -> None:
+        self._briefing_mode = "night"
+        self.icon_lbl.setText("🌙")
+        self.btn_morning.setStyleSheet(self._mode_btn_style(active=False))
+        self.btn_night.setStyleSheet(self._mode_btn_style(active=True))
+        self.play_btn.setText("▶ Play Evening Briefing")
+
+    def _on_play_briefing(self) -> None:
+        cmd = "play morning briefing" if self._briefing_mode == "morning" else "evening briefing"
+        self.briefing_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
+
+    def refresh_counts(self, events_count: int = 0, unread_emails: int = 0) -> None:
+        ev_str = f"📅 {events_count} event{'s' if events_count != 1 else ''} today"
+        mail_str = f"✉️ {unread_emails} unread email{'s' if unread_emails != 1 else ''}"
+        self.counts_lbl.setText(f"{ev_str} • {mail_str}")
+
+
+class GitDevCard(CyberCard):
+    """Git & Dev Repository Card with branch dropdown, status, diff, Switch and Commit actions."""
+
+    git_action_triggered = Signal(str)
+
+    def __init__(self, controller: UIController | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.controller = controller
+        self.setMinimumSize(260, 115)
+        self.setMaximumSize(420, 135)
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(3)
+
+        # Header Row
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
+
+        icon_lbl = QLabel("🌿")
+        icon_lbl.setStyleSheet("font-size: 13px;")
+        header_row.addWidget(icon_lbl)
+
+        title_lbl = QLabel("Git & Dev Workflow")
+        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+
+        self.repo_state_lbl = QLabel("● Synced")
+        self.repo_state_lbl.setStyleSheet(f"color: {STATUS_SUCCESS}; font-size: 9px; font-weight: 700;")
+        header_row.addWidget(self.repo_state_lbl)
+        layout.addLayout(header_row)
+
+        # Branch Row: Label + QComboBox + Switch button
+        branch_row = QHBoxLayout()
+        branch_row.setSpacing(6)
+
+        b_lbl = QLabel("Branch:")
+        b_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; font-weight: 500;")
+        branch_row.addWidget(b_lbl)
+
+        self.branch_combo = QComboBox()
+        self.branch_combo.setFixedHeight(24)
+        self.branch_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.branch_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: rgba(15, 23, 42, 0.9);
+                color: {TEXT_PRIMARY};
+                border: 1px solid {BORDER_SUBTLE};
+                border-radius: 4px;
+                padding-left: 6px;
+                font-size: 10px;
+                font-weight: 600;
+            }}
+            QComboBox:hover {{
+                border: 1px solid {PRIMARY_CYAN};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 14px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: #0B1120;
+                color: #FFFFFF;
+                selection-background-color: #1E293B;
+                border: 1px solid #1E293B;
+            }}
+        """)
+        self.branch_combo.addItems(["main", "master", "dev"])
+        branch_row.addWidget(self.branch_combo, stretch=1)
+
+        self.switch_btn = QPushButton("Switch")
+        self.switch_btn.setFixedHeight(24)
+        self.switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.switch_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(30, 58, 138, 0.7);
+                color: #FFFFFF;
+                border: 1px solid rgba(59, 130, 246, 0.4);
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid #00E5FF;
+                background: rgba(30, 58, 138, 0.95);
+            }}
+        """)
+        self.switch_btn.clicked.connect(self._on_switch_branch)
+        branch_row.addWidget(self.switch_btn)
+        layout.addLayout(branch_row)
+
+        # Diff & Status line
+        self.diff_lbl = QLabel("● Working tree clean • Diff: 0 lines")
+        self.diff_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; font-weight: 500;")
+        layout.addWidget(self.diff_lbl)
+
+        # Action Buttons: Commit and Status
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+
+        self.commit_btn = QPushButton("💾 Commit")
+        self.commit_btn.setFixedHeight(24)
+        self.commit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.commit_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(15, 23, 42, 0.85);
+                color: {TEXT_PRIMARY};
+                border: 1px solid {BORDER_SUBTLE};
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {PRIMARY_CYAN};
+                color: #FFFFFF;
+            }}
+        """)
+        self.commit_btn.clicked.connect(self._on_commit)
+        action_row.addWidget(self.commit_btn)
+
+        self.status_btn = QPushButton("📊 Status")
+        self.status_btn.setFixedHeight(24)
+        self.status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(15, 23, 42, 0.85);
+                color: {TEXT_PRIMARY};
+                border: 1px solid {BORDER_SUBTLE};
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {PRIMARY_CYAN};
+                color: #FFFFFF;
+            }}
+        """)
+        self.status_btn.clicked.connect(self._on_status)
+        action_row.addWidget(self.status_btn)
+
+        layout.addLayout(action_row)
+
+    def _on_switch_branch(self) -> None:
+        target_branch = self.branch_combo.currentText().strip()
+        if not target_branch:
+            return
+        cmd = f"git switch branch {target_branch}"
+        self.git_action_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
+
+    def _on_commit(self) -> None:
+        cmd = "git commit staged changes"
+        self.git_action_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
+
+    def _on_status(self) -> None:
+        cmd = "git status"
+        self.git_action_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
+
+
+class DownloadsCleanerCard(CyberCard):
+    """Downloads & File Hygiene Cleaner Card with Dry Run (default) and Organize actions."""
+
+    cleaner_action_triggered = Signal(str)
+
+    def __init__(self, controller: UIController | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.controller = controller
+        self.setMinimumSize(260, 115)
+        self.setMaximumSize(420, 135)
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(3)
+
+        # Header
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
+
+        icon_lbl = QLabel("📁")
+        icon_lbl.setStyleSheet("font-size: 13px;")
+        header_row.addWidget(icon_lbl)
+
+        title_lbl = QLabel("Downloads Cleaner")
+        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+
+        self.hygiene_badge = QLabel("HYGIENE READY")
+        self.hygiene_badge.setStyleSheet(
+            "color: #10B981; font-size: 8px; font-weight: 700; background: rgba(16, 185, 129, 0.15); "
+            "padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3);"
+        )
+        header_row.addWidget(self.hygiene_badge)
+        layout.addLayout(header_row)
+
+        # Target & Category info
+        self.target_lbl = QLabel("Target: ~/Downloads • Docs, Media, Archives, Code")
+        self.target_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; font-weight: 500;")
+        layout.addWidget(self.target_lbl)
+
+        self.status_lbl = QLabel("Dry run preview recommended before moving files")
+        self.status_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px;")
+        layout.addWidget(self.status_lbl)
+
+        # Action Buttons (Dry Run is default / prominent)
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        self.dry_run_btn = QPushButton("🔍 Dry Run Scan")
+        self.dry_run_btn.setFixedHeight(26)
+        self.dry_run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dry_run_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {GRADIENT_TEAL};
+                color: #FFFFFF;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid #FFFFFF;
+                background: {GRADIENT_TEAL};
+            }}
+            QPushButton:pressed {{
+                background-color: {PRIMARY_BLUE};
+            }}
+        """)
+        self.dry_run_btn.clicked.connect(self._on_dry_run)
+        action_row.addWidget(self.dry_run_btn, stretch=1)
+
+        self.organize_btn = QPushButton("🧹 Organize Now")
+        self.organize_btn.setFixedHeight(26)
+        self.organize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.organize_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(15, 23, 42, 0.85);
+                color: {TEXT_PRIMARY};
+                border: 1px solid {BORDER_SUBTLE};
+                border-radius: 6px;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {PRIMARY_CYAN};
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(6, 182, 212, 0.2);
+            }}
+        """)
+        self.organize_btn.clicked.connect(self._on_organize)
+        action_row.addWidget(self.organize_btn, stretch=1)
+
+        layout.addLayout(action_row)
+
+    def _on_dry_run(self) -> None:
+        cmd = "organize downloads dry run"
+        self.cleaner_action_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
+
+    def _on_organize(self) -> None:
+        cmd = "organize downloads"
+        self.cleaner_action_triggered.emit(cmd)
+        if self.controller:
+            self.controller.submit_command(cmd)
 
 
 class BottomBarWidget(QFrame):
@@ -1364,12 +1832,12 @@ class DenverHomeTabWidget(QWidget):
 
         # Scroll area for clean responsive embedding inside tab panels
         from PySide6.QtWidgets import QScrollArea
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.scroll.setStyleSheet(f"""
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.scroll_area.setStyleSheet(f"""
             QScrollArea {{
                 background: transparent;
                 border: none;
@@ -1408,8 +1876,19 @@ class DenverHomeTabWidget(QWidget):
         self.ai_status_card = AIStatusCard(controller=self.controller, parent=container)
         grid.addWidget(self.ai_status_card, 2, 1)
 
-        self.scroll.setWidget(container)
-        main_layout.addWidget(self.scroll)
+        # Row 3: Audio Briefings & Git / Dev Workflow
+        self.briefing_card = AudioBriefingCard(controller=self.controller, parent=container)
+        grid.addWidget(self.briefing_card, 3, 0)
+
+        self.git_card = GitDevCard(controller=self.controller, parent=container)
+        grid.addWidget(self.git_card, 3, 1)
+
+        # Row 4: Downloads & File Hygiene Cleaner (spanning full width)
+        self.cleaner_card = DownloadsCleanerCard(controller=self.controller, parent=container)
+        grid.addWidget(self.cleaner_card, 4, 0, 1, 2)
+
+        self.scroll_area.setWidget(container)
+        main_layout.addWidget(self.scroll_area)
 
         # Guarantee scroll position starts at the top
         QTimer.singleShot(0, self.scroll_to_top)
@@ -1421,8 +1900,8 @@ class DenverHomeTabWidget(QWidget):
 
     def scroll_to_top(self) -> None:
         """Ensure the Home tab scroll area is positioned at the top."""
-        if hasattr(self, "scroll") and self.scroll:
-            self.scroll.verticalScrollBar().setValue(0)
+        if hasattr(self, "scroll_area") and self.scroll_area:
+            self.scroll_area.verticalScrollBar().setValue(0)
 
     def _on_telemetry_tick(self) -> None:
         """Periodic background refresh for quick status and system indicators."""

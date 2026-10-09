@@ -52,7 +52,7 @@ from denver.runtime.events import (
     ProviderModeChanged,
     SpotifyPlaybackChanged,
 )
-from denver.runtime.state_machine import DenverStateMachine
+from denver.runtime.state_machine import DenverStateMachine, InvalidStateTransitionError
 from denver.runtime.states import DenverState
 from denver.utils.logging_helpers import mask_phone
 
@@ -95,6 +95,7 @@ class CommandEngineService:
             event_bus=self.event_bus,
             allow_high_risk_actions=self.settings.allow_high_risk_actions,
         )
+        self.automation.settings = self.settings
         self.context_engine = ContextEngine(
             memory_service=self.memory,
             event_bus=self.event_bus,
@@ -152,8 +153,41 @@ class CommandEngineService:
         from denver.automation.spotify import SpotifyController
         self.spotify_controller = SpotifyController()
 
+        from denver.core.self_model import DenverSelfModel
+        self.self_model = DenverSelfModel(
+            settings=self.settings,
+            action_registry=self.registry,
+            provider_router=self.provider_router,
+            plugin_registry=self.plugin_registry,
+            state_machine=self.state_machine,
+        )
+
+        from denver.core.observer import DesktopObserverEngine
+        self.desktop_observer = DesktopObserverEngine(
+            native_api=getattr(getattr(self.automation, "windows", None), "api", None),
+            window_manager=getattr(self.automation, "windows", None),
+            event_bus=self.event_bus,
+        )
+
+        if hasattr(self, "context_engine") and self.context_engine:
+            self.context_engine.self_model = self.self_model
+            self.context_engine.desktop_observer = self.desktop_observer
+
+        # Pillar 4: Metacognitive Loop (Plan -> Act -> Verify -> Adapt)
+        from denver.core.metacognition import MetacognitiveLoop, StateVerifier
+        self.state_verifier = StateVerifier(
+            native_api=getattr(getattr(self.automation, "windows", None), "api", None),
+            observer=self.desktop_observer,
+        )
+        self.metacognitive_loop = MetacognitiveLoop(
+            action_executor=self._execute_action_direct,
+            state_verifier=self.state_verifier,
+            self_model=self.self_model,
+        )
 
         self._register_default_actions()
+
+
 
 
     def _register_default_actions(self) -> None:
@@ -320,6 +354,16 @@ class CommandEngineService:
                 risk_level=CommandRiskLevel.LOW,
                 requires_confirmation=False,
                 handler=self._handle_disable_plugin,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="introspect_capabilities",
+                description="Introspects and queries Denver's active self-model, runtime state, AI provider, and capabilities.",
+                category=CommandCategory.SYSTEM,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_introspect_capabilities,
             )
         )
         self.registry.register(
@@ -519,6 +563,17 @@ class CommandEngineService:
                 handler=self._handle_show_desktop,
             )
         )
+        self.registry.register(
+            ActionDefinition(
+                name="get_active_window",
+                description="Queries the active foreground window, application, and workspace context.",
+                category=CommandCategory.APPLICATION,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_get_active_window,
+            )
+        )
+
 
         # 5. Volume Control
         self.registry.register(
@@ -1176,6 +1231,474 @@ class CommandEngineService:
                 category=CommandCategory.SYSTEM,
                 risk_level=CommandRiskLevel.LOW,
                 handler=self._handle_switch_llm_provider,
+            )
+        )
+
+        # 32. Email Automation & Continuous Inbox Monitoring
+        self.registry.register(
+            ActionDefinition(
+                name="check_emails",
+                description="Checks and retrieves unread emails from the monitored inbox.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_check_emails,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="read_latest_email",
+                description="Reads and summarizes the latest email received.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_read_latest_email,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="summarize_emails",
+                description="Analyzes and provides AI summaries and action items for inbox emails.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_summarize_emails,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="start_email_monitor",
+                description="Starts continuous background email monitoring and inbox analysis.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_start_email_monitor,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="stop_email_monitor",
+                description="Stops continuous background email monitoring.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_stop_email_monitor,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="get_email_monitor_status",
+                description="Reports telemetry and status of continuous email monitoring.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_get_email_monitor_status,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="draft_email",
+                description="Creates and stages an email draft for user review.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_draft_email,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="send_email",
+                description="Dispatches an email to recipients with confirmation gating.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+                handler=self._handle_send_email,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="reply_to_email",
+                description="Sends an email reply to the latest or specified email message.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+                handler=self._handle_reply_to_email,
+            )
+        )
+
+        # 32b. Calendar & Meeting Scheduler Integration (Step 2)
+        self.registry.register(
+            ActionDefinition(
+                name="get_today_schedule",
+                description="Retrieves the agenda, meetings, and scheduled events for today or specified date.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_get_today_schedule,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="create_calendar_event",
+                description="Schedules a new meeting or calendar appointment.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_create_calendar_event,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="get_next_meeting",
+                description="Queries the next upcoming meeting or appointment.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_get_next_meeting,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="delete_calendar_event",
+                description="Removes or cancels a calendar event by ID or title.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_delete_calendar_event,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="search_calendar_events",
+                description="Searches calendar events by title, description, or location.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_search_calendar_events,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="import_calendar_ics",
+                description="Imports RFC 5545 iCalendar data into the local event schedule.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_import_calendar_ics,
+            )
+        )
+
+        # 32c. Local Document & PDF Semantic RAG (Step 3)
+        self.registry.register(
+            ActionDefinition(
+                name="index_document",
+                description="Extracts, chunks, embeds, and indexes a local document or PDF for semantic search.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_index_document,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="search_documents",
+                description="Searches indexed documents and PDFs using hybrid vector similarity and keyword ranking.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_search_documents,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="ask_document",
+                description="Answers questions based on indexed document contents with citations.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_ask_document,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="list_documents",
+                description="Lists all indexed documents and PDFs with chunk counts.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_list_documents,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="delete_document",
+                description="Removes an indexed document and its chunks from the RAG store.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_delete_document,
+            )
+        )
+
+        # 32d. Spoken Voice Profile Selector (Step 4)
+        self.registry.register(
+            ActionDefinition(
+                name="switch_voice",
+                description="Switches Denver's spoken TTS voice personality.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_switch_voice,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="list_voices",
+                description="Lists all available neural spoken voices, accents, and tones.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_list_voices,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="set_voice_speed",
+                description="Adjusts the speech rate/speed of Denver's spoken voice.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_set_voice_speed,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="set_voice_pitch",
+                description="Adjusts the pitch of Denver's spoken voice.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_set_voice_pitch,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="preview_voice",
+                description="Previews a sample audio phrase using the specified or active voice profile.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_preview_voice,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="get_voice_settings",
+                description="Displays current voice profile, speed rate, and pitch settings.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_get_voice_settings,
+            )
+        )
+
+        # 32e. File System Assistant & Downloads Organizer (Step 5)
+        self.registry.register(
+            ActionDefinition(
+                name="organize_downloads",
+                description="Organizes files in Downloads or target directory into categorized folders.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_organize_downloads,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="find_large_files",
+                description="Scans directory for large files exceeding a size threshold.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_find_large_files,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="find_duplicate_files",
+                description="Scans directory and detects duplicate files using content hash comparison.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_find_duplicate_files,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="clean_temp_files",
+                description="Identifies and removes temporary files, logs, and scratch artifacts.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_clean_temp_files,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="undo_file_organization",
+                description="Reverts the most recent file organization run.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_undo_file_organization,
+            )
+        )
+
+        # 32f. Local Git & Dev Workflow Actions (Step 6)
+        self.registry.register(
+            ActionDefinition(
+                name="git_status",
+                description="Queries git repository branch, staging area, and modified status.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_git_status,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_branches",
+                description="Lists local git branches and marks active branch.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_git_branches,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_log",
+                description="Displays recent git commit history with hashes, authors, and messages.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_git_log,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_diff",
+                description="Summarizes working tree differences or staged git diff stats.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_git_diff,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_create_branch",
+                description="Creates and optionally checks out a new git branch.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_git_create_branch,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_switch_branch",
+                description="Switches active working branch to an existing git branch.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_git_switch_branch,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="git_commit",
+                description="Records changes to repository with commit message.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_git_commit,
+            )
+        )
+
+        # 32g. Proactive Morning & Evening Audio Briefings (Step 7)
+        self.registry.register(
+            ActionDefinition(
+                name="morning_briefing",
+                description="Synthesizes and speaks comprehensive morning schedule, weather, inbox, and dev briefing.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_morning_briefing,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="evening_briefing",
+                description="Synthesizes and speaks comprehensive evening wrap-up, achievements, and tomorrow preview.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_evening_briefing,
+            )
+        )
+
+        # 33. Pillar 3: Evolving Memory, User Corrections & Learned Habits
+        self.registry.register(
+            ActionDefinition(
+                name="list_corrections",
+                description="Lists active user corrections and behavioral overrides learned by Denver.",
+                category=CommandCategory.MEMORY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_list_corrections,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="clear_correction",
+                description="Clears or deletes a learned user correction by its numerical ID.",
+                category=CommandCategory.MEMORY,
+                risk_level=CommandRiskLevel.LOW,
+                requires_confirmation=False,
+                handler=self._handle_clear_correction,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="list_habits",
+                description="Lists learned habits, patterns, tools, and proactive suggestions.",
+                category=CommandCategory.MEMORY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_list_habits,
+            )
+        )
+
+        # 34. Pillar 4: Metacognitive Loop (Plan -> Act -> Verify -> Adapt)
+        self.registry.register(
+            ActionDefinition(
+                name="explain_plan",
+                description="Explains pre-flight execution plan and expected state verification for an instruction.",
+                category=CommandCategory.UTILITY,
+                risk_level=CommandRiskLevel.SAFE,
+                requires_confirmation=False,
+                handler=self._handle_explain_plan,
+            )
+        )
+        self.registry.register(
+            ActionDefinition(
+                name="metacognitive_execute",
+                description="Executes a multi-step instruction through the self-reflective Plan -> Act -> Verify -> Adapt loop.",
+                category=CommandCategory.TASK,
+                risk_level=CommandRiskLevel.MEDIUM,
+                requires_confirmation=False,
+                handler=self._handle_metacognitive_execute,
             )
         )
 
@@ -1864,6 +2387,19 @@ class CommandEngineService:
             error=res.error,
         )
 
+    async def _handle_get_active_window(self, params: dict[str, Any]) -> ActionResult:
+        """Inspect and report the currently active desktop window and workspace."""
+        ctx = self.desktop_observer.get_active_window()
+        speech = self.desktop_observer.format_active_window_speech(ctx)
+        data = ctx.to_dict() if ctx else {}
+        return ActionResult(
+            success=True,
+            message=speech,
+            action_name="get_active_window",
+            data=data,
+        )
+
+
     async def _handle_get_volume(self, params: dict[str, Any]) -> ActionResult:
         req = AutomationRequest(action_name="get_volume", params=params)
         res = await self.automation.execute(req)
@@ -2071,6 +2607,1053 @@ class CommandEngineService:
             error=res.error,
         )
 
+    async def _handle_check_emails(self, params: dict[str, Any]) -> ActionResult:
+        """Fetch and check unread emails in the monitored inbox."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="check_emails", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="check_emails",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        summaries = await monitor.check_now(limit=int(params.get("limit", 5)))
+        formatted = "\n\n".join(s.format_display() for s in summaries) if summaries else "Your inbox has no new unread emails."
+        return ActionResult(
+            success=True,
+            message=formatted,
+            action_name="check_emails",
+            data={"count": len(summaries), "summaries": [s.to_dict() for s in summaries]},
+        )
+
+    async def _handle_read_latest_email(self, params: dict[str, Any]) -> ActionResult:
+        """Fetch and read the latest email received."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="read_latest_email", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="read_latest_email",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        messages = await monitor.client.fetch_recent(limit=1)
+        if not messages:
+            return ActionResult(success=True, message="No emails found in your inbox.", action_name="read_latest_email")
+        summary = await monitor.analyzer.analyze_message(messages[0])
+        return ActionResult(
+            success=True,
+            message=summary.format_display(),
+            action_name="read_latest_email",
+            data={"summary": summary.to_dict()},
+        )
+
+    async def _handle_summarize_emails(self, params: dict[str, Any]) -> ActionResult:
+        """Summarize current inbox emails with action items."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="summarize_emails", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="summarize_emails",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        messages = await monitor.client.fetch_unread(limit=int(params.get("limit", 5)))
+        summaries = await monitor.analyzer.analyze_batch(messages)
+        formatted = "\n\n".join(s.format_display() for s in summaries) if summaries else "Your inbox has no new unread emails."
+        return ActionResult(
+            success=True,
+            message=formatted,
+            action_name="summarize_emails",
+            data={"count": len(summaries), "summaries": [s.to_dict() for s in summaries]},
+        )
+
+    async def _handle_start_email_monitor(self, params: dict[str, Any]) -> ActionResult:
+        """Start continuous email monitoring in the background."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="start_email_monitor", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="start_email_monitor",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        started = await monitor.start()
+        return ActionResult(
+            success=started,
+            message="Continuous email monitoring started." if started else "Email monitoring is already active.",
+            action_name="start_email_monitor",
+            data=monitor.get_status(),
+        )
+
+    async def _handle_stop_email_monitor(self, params: dict[str, Any]) -> ActionResult:
+        """Stop continuous email monitoring in the background."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="stop_email_monitor", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="stop_email_monitor",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        stopped = await monitor.stop()
+        return ActionResult(
+            success=stopped,
+            message="Continuous email monitoring stopped." if stopped else "Email monitoring is not active.",
+            action_name="stop_email_monitor",
+            data=monitor.get_status(),
+        )
+
+    async def _handle_get_email_monitor_status(self, params: dict[str, Any]) -> ActionResult:
+        """Query email monitoring status and telemetry."""
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        return ActionResult(
+            success=True,
+            message="Email monitor status retrieved.",
+            action_name="get_email_monitor_status",
+            data=monitor.get_status(),
+        )
+
+    async def _handle_draft_email(self, params: dict[str, Any]) -> ActionResult:
+        """Create and stage a draft email."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="draft_email", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="draft_email",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        draft = monitor.client.create_draft(
+            to=str(params.get("to", "")),
+            subject=str(params.get("subject", "No Subject")),
+            body=str(params.get("body", "")),
+            cc=str(params.get("cc", "")),
+            bcc=str(params.get("bcc", "")),
+        )
+        return ActionResult(
+            success=True,
+            message=f"Email draft '{draft.draft_id}' created for {draft.to}: '{draft.subject}'.",
+            action_name="draft_email",
+            data=draft.to_dict(),
+        )
+
+    async def _handle_send_email(self, params: dict[str, Any]) -> ActionResult:
+        """Send an email with safety confirmation gating."""
+        to = str(params.get("to", ""))
+        subject = str(params.get("subject", "No Subject"))
+        body = str(params.get("body", ""))
+        cc = str(params.get("cc", ""))
+        bcc = str(params.get("bcc", ""))
+        confirmed = bool(params.get("confirmed", False))
+
+        if not confirmed and not self.settings.allow_high_risk_actions:
+            if hasattr(self, "automation") and self.automation and hasattr(self.automation, "confirmation"):
+                req = self.automation.confirmation.create_pending(
+                    action_name="send_email",
+                    action_params={
+                        "to": to,
+                        "subject": subject,
+                        "body": body,
+                        "cc": cc,
+                        "bcc": bcc,
+                        "confirmed": True,
+                    },
+                    prompt_message=f"Send email to {to} with subject '{subject}'?",
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"I've prepared the email to {to} with subject '{subject}'. Please say 'confirm' or 'yes' to send it, or 'cancel' to abort.",
+                    action_name="send_email",
+                    data={"token": req.token, "to": to, "subject": subject, "requires_confirmation": True},
+                )
+
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="send_email", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="send_email",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        if getattr(self.settings, "email_mock_mode", False):
+            monitor.config.is_mock = True
+            monitor.client.config.is_mock = True
+        send_res = await monitor.client.send_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        return ActionResult(
+            success=send_res.success,
+            message=send_res.message,
+            action_name="send_email",
+            data=send_res.to_dict(),
+            error=send_res.error,
+        )
+
+    async def _handle_reply_to_email(self, params: dict[str, Any]) -> ActionResult:
+        """Reply to an email with safety confirmation gating."""
+        body = str(params.get("body", ""))
+        uid = params.get("uid")
+        confirmed = bool(params.get("confirmed", False))
+
+        from denver.automation.email import get_email_monitor
+        monitor = get_email_monitor()
+        target_msg = None
+        if uid:
+            recents = await monitor.client.fetch_recent(limit=10)
+            for m in recents:
+                if m.uid == uid:
+                    target_msg = m
+                    break
+        else:
+            recents = await monitor.client.fetch_recent(limit=1)
+            if recents:
+                target_msg = recents[0]
+
+        to = target_msg.sender if target_msg else "recipient"
+        subject = f"Re: {target_msg.subject}" if target_msg else "Re: Email"
+
+        if not confirmed and not self.settings.allow_high_risk_actions:
+            if hasattr(self, "automation") and self.automation and hasattr(self.automation, "confirmation"):
+                req = self.automation.confirmation.create_pending(
+                    action_name="reply_to_email",
+                    action_params={
+                        "body": body,
+                        "uid": uid,
+                        "confirmed": True,
+                    },
+                    prompt_message=f"Reply to {to} with message: '{body}'?",
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"I've drafted a reply to {to}. Please say 'confirm' or 'yes' to send, or 'cancel' to abort.",
+                    action_name="reply_to_email",
+                    data={"token": req.token, "to": to, "subject": subject, "body": body, "requires_confirmation": True},
+                )
+
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="reply_to_email", params={"body": body, "uid": uid})
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="reply_to_email",
+                data=res.data,
+                error=res.error,
+            )
+
+        res = await monitor.client.reply_to_email(body=body, uid=uid)
+        return ActionResult(
+            success=res.success,
+            message=res.message,
+            action_name="reply_to_email",
+            data=res.to_dict(),
+            error=res.error,
+        )
+
+    async def _handle_get_today_schedule(self, params: dict[str, Any]) -> ActionResult:
+        """Fetch and format day schedule or calendar overview."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="get_today_schedule", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="get_today_schedule",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        cal = get_calendar_service()
+        schedule = cal.get_events_for_date(params.get("date"))
+        return ActionResult(
+            success=True,
+            message=schedule.format_briefing(),
+            action_name="get_today_schedule",
+            data=schedule.to_dict(),
+        )
+
+    async def _handle_create_calendar_event(self, params: dict[str, Any]) -> ActionResult:
+        """Schedule a new calendar event."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="create_calendar_event", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="create_calendar_event",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        from denver.calendar.service import _resolve_datetime_expr
+        cal = get_calendar_service()
+        title = str(params.get("title", "Meeting"))
+        start_time = params.get("start_time") or params.get("time")
+        if not start_time:
+            start_time = _resolve_datetime_expr(str(params.get("date_expr", "today at 10 AM")))
+        event = cal.create_event(
+            title=title,
+            start_time=start_time,
+            end_time=params.get("end_time"),
+            location=str(params.get("location", "")),
+            description=str(params.get("description", "")),
+        )
+        return ActionResult(
+            success=True,
+            message=f"Scheduled '{event.title}' on {event.starts_at_dt().strftime('%A, %b %d at %I:%M %p')}.",
+            action_name="create_calendar_event",
+            data=event.to_dict(),
+        )
+
+    async def _handle_get_next_meeting(self, params: dict[str, Any]) -> ActionResult:
+        """Query next upcoming meeting."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="get_next_meeting", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="get_next_meeting",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        cal = get_calendar_service()
+        ev = cal.get_next_meeting()
+        if ev:
+            msg = f"Your next meeting is '{ev.title}' at {ev.format_time_span()} on {ev.starts_at_dt().strftime('%A, %b %d')}."
+            return ActionResult(success=True, message=msg, action_name="get_next_meeting", data=ev.to_dict())
+        return ActionResult(success=True, message="You have no upcoming meetings scheduled.", action_name="get_next_meeting", data={"has_upcoming": False})
+
+    async def _handle_delete_calendar_event(self, params: dict[str, Any]) -> ActionResult:
+        """Delete an event from calendar."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="delete_calendar_event", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="delete_calendar_event",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        cal = get_calendar_service()
+        event_id = params.get("event_id") or params.get("id")
+        title = params.get("title")
+        deleted = cal.delete_event(event_id=int(event_id) if event_id else None, title=title)
+        return ActionResult(
+            success=deleted,
+            message=f"Calendar event '{event_id or title}' removed." if deleted else f"Calendar event '{event_id or title}' not found.",
+            action_name="delete_calendar_event",
+            data={"deleted": deleted},
+        )
+
+    async def _handle_search_calendar_events(self, params: dict[str, Any]) -> ActionResult:
+        """Search calendar events by keyword."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="search_calendar_events", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="search_calendar_events",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        cal = get_calendar_service()
+        query = str(params.get("query", ""))
+        events = cal.search_events(query)
+        formatted = "\n".join(e.format_display() for e in events) if events else f"No events found matching '{query}'."
+        return ActionResult(
+            success=True,
+            message=formatted,
+            action_name="search_calendar_events",
+            data={"count": len(events), "events": [e.to_dict() for e in events]},
+        )
+
+    async def _handle_import_calendar_ics(self, params: dict[str, Any]) -> ActionResult:
+        """Import iCalendar ICS data."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="import_calendar_ics", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="import_calendar_ics",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.calendar import get_calendar_service
+        cal = get_calendar_service()
+        content = str(params.get("ics_data") or params.get("path", ""))
+        count = cal.import_ics(content)
+        return ActionResult(
+            success=True,
+            message=f"Successfully imported {count} event(s) into your calendar.",
+            action_name="import_calendar_ics",
+            data={"imported_count": count},
+        )
+
+    # Step 3: Local Document & PDF Semantic RAG Handlers
+    async def _handle_index_document(self, params: dict[str, Any]) -> ActionResult:
+        """Extract, chunk, embed, and index a local document or PDF."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="index_document", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="index_document",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.rag import get_rag_service
+        rag = get_rag_service()
+        path = str(params.get("path") or params.get("file_path", ""))
+        meta = await rag.index_file(path)
+        return ActionResult(
+            success=True,
+            message=f"Indexed document '{meta.file_name}' ({meta.file_type.upper()}) into {meta.chunk_count} chunk(s).",
+            action_name="index_document",
+            data=meta.to_dict(),
+        )
+
+    async def _handle_search_documents(self, params: dict[str, Any]) -> ActionResult:
+        """Search indexed documents using semantic and keyword hybrid ranking."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="search_documents", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="search_documents",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.rag import get_rag_service
+        rag = get_rag_service()
+        query = str(params.get("query", ""))
+        top_k = int(params.get("top_k", 5))
+        file_filter = params.get("file_filter")
+        results = await rag.search(query=query, top_k=top_k, file_filter=file_filter)
+        if results:
+            formatted = "\n\n".join(
+                f"[{i}] {r.file_name}" + (f" (Page {r.page})" if r.page else "") + f" [Match: {int(r.score * 100)}%]:\n{r.snippet}"
+                for i, r in enumerate(results, start=1)
+            )
+            msg = f"Found {len(results)} matching document excerpt(s):\n\n{formatted}"
+        else:
+            msg = f"No document matches found for '{query}'."
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="search_documents",
+            data={"count": len(results), "results": [r.to_dict() for r in results]},
+        )
+
+    async def _handle_ask_document(self, params: dict[str, Any]) -> ActionResult:
+        """Answer queries based on indexed documents."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="ask_document", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="ask_document",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.rag import get_rag_service
+        rag = get_rag_service()
+        query = str(params.get("query", ""))
+        file_filter = params.get("file_filter")
+        ans = await rag.ask(query=query, file_filter=file_filter)
+        return ActionResult(
+            success=True,
+            message=ans.format_display(),
+            action_name="ask_document",
+            data=ans.to_dict(),
+        )
+
+    async def _handle_list_documents(self, params: dict[str, Any]) -> ActionResult:
+        """List all indexed documents."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="list_documents", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="list_documents",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.rag import get_rag_service
+        rag = get_rag_service()
+        docs = rag.list_documents()
+        if docs:
+            lines = [f"- {d['file_name']}: {d['chunk_count']} chunk(s) (indexed {d['indexed_at']})" for d in docs]
+            msg = f"Indexed Documents ({len(docs)}):\n" + "\n".join(lines)
+        else:
+            msg = "No documents have been indexed yet. Use 'index document <path>' to add files."
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="list_documents",
+            data={"count": len(docs), "documents": docs},
+        )
+
+    async def _handle_delete_document(self, params: dict[str, Any]) -> ActionResult:
+        """Delete document from RAG index."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="delete_document", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="delete_document",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.rag import get_rag_service
+        rag = get_rag_service()
+        target = str(params.get("path") or params.get("file_name", ""))
+        deleted = rag.delete_document(target)
+        return ActionResult(
+            success=deleted,
+            message=f"Removed indexed document '{target}'." if deleted else f"Document '{target}' was not found in index.",
+            action_name="delete_document",
+            data={"deleted": deleted},
+        )
+
+    # Step 4: Spoken Voice Profile Selector (Edge-TTS) Handlers
+    async def _handle_switch_voice(self, params: dict[str, Any]) -> ActionResult:
+        """Switch active spoken voice personality."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="switch_voice", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="switch_voice",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        vm = get_voice_manager()
+        voice_target = str(params.get("voice") or params.get("name", ""))
+        ok, profile, msg = vm.set_voice(voice_target)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="switch_voice",
+            data=profile.to_dict() if profile else {},
+        )
+
+    async def _handle_list_voices(self, params: dict[str, Any]) -> ActionResult:
+        """List all available spoken voice options."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="list_voices", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="list_voices",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        from denver.audio.voices import list_available_voices
+        vm = get_voice_manager()
+        voices = list_available_voices()
+        active_id = vm.active_voice.voice_id
+        lines = [
+            f"- {'[ACTIVE] ' if v.voice_id == active_id else ''}{v.name} ({v.locale} {v.gender}) — {v.tone}"
+            for v in voices
+        ]
+        msg = f"Available Spoken Voices ({len(voices)}):\n" + "\n".join(lines)
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="list_voices",
+            data={"voices": [v.to_dict() for v in voices], "active_voice": vm.active_voice.to_dict()},
+        )
+
+    async def _handle_set_voice_speed(self, params: dict[str, Any]) -> ActionResult:
+        """Adjust speech rate/speed."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="set_voice_speed", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="set_voice_speed",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        vm = get_voice_manager()
+        speed = str(params.get("speed") or params.get("rate", ""))
+        ok, rate, msg = vm.set_speed(speed)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="set_voice_speed",
+            data={"rate": rate},
+        )
+
+    async def _handle_set_voice_pitch(self, params: dict[str, Any]) -> ActionResult:
+        """Adjust voice pitch."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="set_voice_pitch", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="set_voice_pitch",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        vm = get_voice_manager()
+        pitch = str(params.get("pitch", ""))
+        ok, pitch_val, msg = vm.set_pitch(pitch)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="set_voice_pitch",
+            data={"pitch": pitch_val},
+        )
+
+    async def _handle_preview_voice(self, params: dict[str, Any]) -> ActionResult:
+        """Preview sample voice phrase."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="preview_voice", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="preview_voice",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        vm = get_voice_manager()
+        voice_target = params.get("voice")
+        phrase = params.get("phrase")
+        ok, msg = await vm.preview_voice(voice_query=voice_target, custom_phrase=phrase)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="preview_voice",
+            data={"voice": vm.active_voice.name},
+        )
+
+    async def _handle_get_voice_settings(self, params: dict[str, Any]) -> ActionResult:
+        """Query current voice configuration."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="get_voice_settings", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="get_voice_settings",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.audio import get_voice_manager
+        vm = get_voice_manager()
+        v = vm.active_voice
+        msg = f"Current Voice: {v.name} ({v.locale} {v.gender}, {v.tone})\nSpeed: {vm.active_rate} | Pitch: {vm.active_pitch}"
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="get_voice_settings",
+            data=vm.get_status(),
+        )
+
+    async def _handle_organize_downloads(self, params: dict[str, Any]) -> ActionResult:
+        """Organize files in downloads or target folder into categorized directories."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="organize_downloads", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="organize_downloads",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.files import get_file_organizer
+        org = get_file_organizer()
+        target_dir = params.get("path") or params.get("target_dir")
+        dry_run = bool(params.get("dry_run", False))
+        summary = org.organize_directory(target_dir=target_dir, dry_run=dry_run)
+        return ActionResult(
+            success=True,
+            message=summary.format_display(),
+            action_name="organize_downloads",
+            data=summary.to_dict(),
+        )
+
+    async def _handle_find_large_files(self, params: dict[str, Any]) -> ActionResult:
+        """Find large files exceeding a minimum size."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="find_large_files", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="find_large_files",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.files import get_file_organizer
+        org = get_file_organizer()
+        target_dir = params.get("path") or params.get("target_dir")
+        min_size_mb = float(params.get("min_size_mb", 50.0))
+        limit = int(params.get("limit", 10))
+        files = org.find_large_files(target_dir=target_dir, min_size_mb=min_size_mb, limit=limit)
+        if files:
+            lines = [f"- {f.name} ({f.format_size()}) [{f.category}]" for f in files]
+            msg = f"Found {len(files)} large file(s) (>={min_size_mb} MB):\n" + "\n".join(lines)
+        else:
+            msg = f"No files larger than {min_size_mb} MB found in {org.get_target_directory(target_dir)}."
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="find_large_files",
+            data={"count": len(files), "files": [f.to_dict() for f in files]},
+        )
+
+    async def _handle_find_duplicate_files(self, params: dict[str, Any]) -> ActionResult:
+        """Find duplicate files by content hash."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="find_duplicate_files", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="find_duplicate_files",
+                data=res.data,
+                error=res.error,
+            )
+        from pathlib import Path
+        from denver.automation.files import get_file_organizer
+        org = get_file_organizer()
+        target_dir = params.get("path") or params.get("target_dir")
+        dups = org.find_duplicates(target_dir=target_dir)
+        if dups:
+            blocks = []
+            for i, grp in enumerate(dups, start=1):
+                file_names = ", ".join(Path(p).name for p in grp.files)
+                blocks.append(f"[{i}] {grp.count} copies ({round(grp.size_bytes / 1024, 1)} KB): {file_names}")
+            msg = f"Found {len(dups)} duplicate file group(s):\n\n" + "\n".join(blocks)
+        else:
+            msg = f"No duplicate files found in {org.get_target_directory(target_dir)}."
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="find_duplicate_files",
+            data={"count": len(dups), "groups": [g.to_dict() for g in dups]},
+        )
+
+    async def _handle_clean_temp_files(self, params: dict[str, Any]) -> ActionResult:
+        """Clean temporary and scratch files."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="clean_temp_files", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="clean_temp_files",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.files import get_file_organizer
+        org = get_file_organizer()
+        target_dir = params.get("path") or params.get("target_dir")
+        count, bytes_freed, msg = org.clean_temp_files(target_dir=target_dir)
+        return ActionResult(
+            success=True,
+            message=msg,
+            action_name="clean_temp_files",
+            data={"cleaned_count": count, "bytes_freed": bytes_freed},
+        )
+
+    async def _handle_undo_file_organization(self, params: dict[str, Any]) -> ActionResult:
+        """Undo the last file organization batch."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="undo_file_organization", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="undo_file_organization",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.files import get_file_organizer
+        org = get_file_organizer()
+        ok, count, msg = org.undo_last_organization()
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="undo_file_organization",
+            data={"reverted_count": count},
+        )
+
+    async def _handle_git_status(self, params: dict[str, Any]) -> ActionResult:
+        """Handle git status queries."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_status", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_status",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        ok, status_res, msg = git_svc.get_status(repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_status",
+            data=status_res.to_dict() if status_res else {},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_branches(self, params: dict[str, Any]) -> ActionResult:
+        """Handle listing git branches."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_branches", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_branches",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        ok, branches, msg = git_svc.get_branches(repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_branches",
+            data={"branches": [b.to_dict() for b in branches], "count": len(branches)},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_log(self, params: dict[str, Any]) -> ActionResult:
+        """Handle viewing recent git commits."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_log", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_log",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        limit = int(params.get("limit", 5))
+        ok, commits, msg = git_svc.get_log(limit=limit, repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_log",
+            data={"commits": [c.to_dict() for c in commits], "count": len(commits)},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_diff(self, params: dict[str, Any]) -> ActionResult:
+        """Handle viewing git diff summary."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_diff", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_diff",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        staged = bool(params.get("staged", False))
+        ok, diff_res, msg = git_svc.get_diff_summary(staged=staged, repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_diff",
+            data=diff_res.to_dict() if diff_res else {},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_create_branch(self, params: dict[str, Any]) -> ActionResult:
+        """Handle creating a new git branch."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_create_branch", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_create_branch",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        branch_name = str(params.get("branch") or params.get("name") or params.get("branch_name", "")).strip()
+        checkout = bool(params.get("checkout", True))
+        ok, msg = git_svc.create_branch(branch_name=branch_name, checkout=checkout, repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_create_branch",
+            data={"branch": branch_name, "checkout": checkout},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_switch_branch(self, params: dict[str, Any]) -> ActionResult:
+        """Handle switching git branch."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_switch_branch", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_switch_branch",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        branch_name = str(params.get("branch") or params.get("name") or params.get("branch_name", "")).strip()
+        ok, msg = git_svc.switch_branch(branch_name=branch_name, repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_switch_branch",
+            data={"branch": branch_name},
+            error=None if ok else msg,
+        )
+
+    async def _handle_git_commit(self, params: dict[str, Any]) -> ActionResult:
+        """Handle committing changes in git."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="git_commit", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="git_commit",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.automation.git import get_git_service
+        git_svc = get_git_service()
+        repo = params.get("repo_path") or params.get("path")
+        commit_msg = str(params.get("message") or "").strip()
+        stage_all = bool(params.get("stage_all", False) or params.get("all", False))
+        ok, msg = git_svc.commit(message=commit_msg, stage_all=stage_all, repo_path=repo)
+        return ActionResult(
+            success=ok,
+            message=msg,
+            action_name="git_commit",
+            data={"message": commit_msg, "stage_all": stage_all},
+            error=None if ok else msg,
+        )
+
+    async def _handle_morning_briefing(self, params: dict[str, Any]) -> ActionResult:
+        """Handle generating and narrating morning audio briefing."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="morning_briefing", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="morning_briefing",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.briefing import get_briefing_service
+        bs = get_briefing_service()
+        speak_audio = bool(params.get("audio", True) and not params.get("no_audio", False))
+        repo = params.get("repo_path") or params.get("path")
+        briefing = await bs.generate_morning_briefing(speak_audio=speak_audio, repo_path=repo)
+        return ActionResult(
+            success=True,
+            message=briefing.format_display(),
+            action_name="morning_briefing",
+            data=briefing.to_dict(),
+        )
+
+    async def _handle_evening_briefing(self, params: dict[str, Any]) -> ActionResult:
+        """Handle generating and narrating evening audio wrap-up briefing."""
+        if hasattr(self, "automation") and self.automation:
+            req = AutomationRequest(action_name="evening_briefing", params=params)
+            res = await self.automation.execute(req)
+            return ActionResult(
+                success=res.success,
+                message=res.message,
+                action_name="evening_briefing",
+                data=res.data,
+                error=res.error,
+            )
+        from denver.briefing import get_briefing_service
+        bs = get_briefing_service()
+        speak_audio = bool(params.get("audio", True) and not params.get("no_audio", False))
+        repo = params.get("repo_path") or params.get("path")
+        briefing = await bs.generate_evening_briefing(speak_audio=speak_audio, repo_path=repo)
+        return ActionResult(
+            success=True,
+            message=briefing.format_display(),
+            action_name="evening_briefing",
+            data=briefing.to_dict(),
+        )
+
     async def _handle_start_meeting_notes(self, params: dict[str, Any]) -> ActionResult:
         title = params.get("title", "Live Meeting")
         if not title or not title.strip():
@@ -2197,6 +3780,18 @@ class CommandEngineService:
             message=f"Plugin '{p_id}' has been disabled.",
             action_name="disable_plugin",
             data={"plugin_id": p_id, "enabled": False},
+        )
+
+    async def _handle_introspect_capabilities(self, params: dict[str, Any]) -> ActionResult:
+        """Introspect Denver's self-model and return authoritative capability report."""
+        category = params.get("category")
+        manifest = self.self_model.get_capabilities_manifest()
+        speech = self.self_model.format_capabilities_speech(category=category)
+        return ActionResult(
+            success=True,
+            message=speech,
+            action_name="introspect_capabilities",
+            data=manifest,
         )
 
     async def _handle_reload_plugins(self, params: dict[str, Any]) -> ActionResult:
@@ -2785,13 +4380,156 @@ class CommandEngineService:
             data={"cleared": True},
         )
 
+    async def _handle_list_corrections(self, params: dict[str, Any]) -> ActionResult:
+        domain = params.get("domain")
+        corrections = await self.memory.list_user_corrections(include_inactive=False)
+        if domain:
+            corrections = [c for c in corrections if c.target_domain.lower() == domain.strip().lower() or c.target_domain.lower() == "general"]
+        if not corrections:
+            return ActionResult(
+                success=True,
+                message="You have no learned corrections or overrides recorded.",
+                action_name="list_corrections",
+                data={"corrections": [], "count": 0},
+            )
+        lines = [f"I have learned {len(corrections)} correction(s):"]
+        for c in corrections:
+            lines.append(f"- #{c.id} [{c.target_domain.upper()}]: {c.correction} (Priority: {c.priority})")
+        return ActionResult(
+            success=True,
+            message="\n".join(lines),
+            action_name="list_corrections",
+            data={"count": len(corrections), "corrections": [c.to_dict() for c in corrections]},
+        )
+
+    async def _handle_clear_correction(self, params: dict[str, Any]) -> ActionResult:
+        corr_id = params.get("correction_id")
+        if corr_id is None:
+            return ActionResult(
+                success=False,
+                message="Please specify the correction ID to clear (e.g. 'clear correction 1').",
+                action_name="clear_correction",
+                error="MissingParameter",
+            )
+        try:
+            cid = int(corr_id)
+        except (ValueError, TypeError):
+            return ActionResult(
+                success=False,
+                message=f"Invalid correction ID '{corr_id}'.",
+                action_name="clear_correction",
+                error="InvalidParameter",
+            )
+        deleted = await self.memory.delete_user_correction(cid)
+        if deleted:
+            return ActionResult(
+                success=True,
+                message=f"Correction #{cid} has been cleared.",
+                action_name="clear_correction",
+                data={"deleted_id": cid},
+            )
+        return ActionResult(
+            success=False,
+            message=f"Correction #{cid} not found.",
+            action_name="clear_correction",
+            error="CorrectionNotFound",
+        )
+
+    async def _handle_list_habits(self, params: dict[str, Any]) -> ActionResult:
+        category = params.get("category")
+        habits = await self.memory.list_learned_habits(category=category, min_confidence=0.3)
+        if not habits:
+            return ActionResult(
+                success=True,
+                message="No recurring habits or usage patterns have been learned yet.",
+                action_name="list_habits",
+                data={"habits": [], "count": 0},
+            )
+        lines = [f"Learned habits and patterns ({len(habits)}):"]
+        for h in habits:
+            lines.append(f"- [{h.category.upper()}] {h.habit_key}: {h.habit_value} ({int(h.confidence * 100)}% confidence, observed {h.frequency}x)")
+        suggestions = await self.memory.get_habit_suggestions(min_confidence=0.6)
+        if suggestions:
+            lines.append("\nProactive Suggestions:")
+            for s in suggestions:
+                lines.append(f"  * {s}")
+        return ActionResult(
+            success=True,
+            message="\n".join(lines),
+            action_name="list_habits",
+            data={"count": len(habits), "habits": [h.to_dict() for h in habits], "suggestions": suggestions},
+        )
+
+    async def _execute_action_direct(self, action_name: str, params: dict[str, Any]) -> ActionResult:
+        """Direct action invocation used by MetacognitiveLoop with safety validation and execution contract."""
+        action_def = self.registry.get(action_name)
+        if not action_def:
+            return ActionResult(
+                success=False,
+                message=f"Action '{action_name}' is not registered.",
+                action_name=action_name,
+                error="ActionNotFound",
+            )
+        req = ActionRequest(
+            action_name=action_name,
+            params=params,
+            risk_level=action_def.risk_level,
+            requires_confirmation=action_def.requires_confirmation,
+        )
+        return await self.executor.execute(req)
+
+    async def _handle_explain_plan(self, params: dict[str, Any]) -> ActionResult:
+        instruction = params.get("instruction") or params.get("query") or params.get("command") or ""
+        if not instruction:
+            return ActionResult(
+                success=False,
+                message="Please specify an instruction to plan (e.g. 'explain plan for open vs code and write note').",
+                action_name="explain_plan",
+                error="MissingInstruction",
+            )
+        from denver.core.metacognition import MetacognitivePlanner
+        plan = MetacognitivePlanner.create_plan(instruction)
+        lines = [f"Metacognitive Pre-Flight Plan for '{plan.goal}' ({len(plan.steps)} steps):"]
+        for s in plan.steps:
+            exp_str = f" [Verify: {s.expected_state.get('type')}]" if s.expected_state else ""
+            fb_str = f" [Fallback: {s.fallback_action}]" if s.fallback_action else ""
+            lines.append(f"{s.id}. {s.description} -> {s.action_name}({s.params}){exp_str}{fb_str}")
+        return ActionResult(
+            success=True,
+            message="\n".join(lines),
+            action_name="explain_plan",
+            data=plan.to_dict(),
+        )
+
+    async def _handle_metacognitive_execute(self, params: dict[str, Any]) -> ActionResult:
+        instruction = params.get("instruction") or params.get("query") or params.get("command") or ""
+        if not instruction:
+            return ActionResult(
+                success=False,
+                message="Please specify an instruction to execute with verification.",
+                action_name="metacognitive_execute",
+                error="MissingInstruction",
+            )
+        from denver.core.metacognition import MetacognitivePlanner
+        plan = MetacognitivePlanner.create_plan(instruction)
+        result = await self.metacognitive_loop.run(plan)
+        return ActionResult(
+            success=result.success,
+            message=result.final_message,
+            action_name="metacognitive_execute",
+            data=result.to_dict(),
+            error=result.failure_diagnosis,
+        )
+
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
+
         """Convert registered actions into provider-independent ToolDefinitions."""
         tools: list[ToolDefinition] = []
         for action in self.registry.list_actions():
             params: list[ToolParameter] = []
             if action.name in {"open_application", "close_application"}:
+
                 params.append(
                     ToolParameter(
                         name="application",
@@ -2829,6 +4567,8 @@ class CommandEngineService:
                 params.append(ToolParameter(name="filename", type="string", description="Optional screenshot filename", required=False))
             elif action.name in {"confirm_action"}:
                 params.append(ToolParameter(name="token", type="string", description="Optional confirmation token", required=False))
+            elif action.name in {"introspect_capabilities"}:
+                params.append(ToolParameter(name="category", type="string", description="Optional category filter (e.g. system, application, memory, utility)", required=False))
 
             tools.append(
                 ToolDefinition(
@@ -2932,7 +4672,11 @@ class CommandEngineService:
                 if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
                     await self.state_machine.transition_to(DenverState.STANDBY, reason="AI tool not registered")
 
-                err_msg = f"Proposed action '{tc.action_name}' is not recognized or registered."
+                err_msg = (
+                    self.self_model.diagnose_failure(action_name=tc.action_name, error="ActionNotFound")
+                    if hasattr(self, "self_model")
+                    else f"Proposed action '{tc.action_name}' is not recognized or registered."
+                )
                 await self.event_bus.publish(
                     CommandFailed(action_name=tc.action_name, reason="ActionNotFound", error=err_msg)
                 )
@@ -2969,6 +4713,11 @@ class CommandEngineService:
                 if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
                     await self.state_machine.transition_to(DenverState.STANDBY, reason="AI tool safety blocked")
 
+                safety_diag = (
+                    self.self_model.diagnose_failure(action_name=tc.action_name, error=f"SafetyBlocked: {safety_err}")
+                    if hasattr(self, "self_model")
+                    else f"Action '{tc.action_name}' was blocked: {safety_err}"
+                )
                 await self.event_bus.publish(
                     CommandFailed(action_name=tc.action_name, reason="SafetyBlocked", error=safety_err or "")
                 )
@@ -2981,7 +4730,7 @@ class CommandEngineService:
                 )
                 resp = CommandResponse(
                     success=False,
-                    message=f"Action '{tc.action_name}' was blocked: {safety_err}",
+                    message=safety_diag,
                     action_name=tc.action_name,
                     data={"safety_violation": safety_err, "ai_tool_call": tc.to_dict(), "provider": ai_res.provider_name},
                     risk_level=CommandRiskLevel.BLOCKED,
@@ -3675,193 +5424,449 @@ class CommandEngineService:
             CommandNormalized(raw_text=req.raw_text, normalized_text=normalized)
         )
 
-        # 4. State transition: -> PROCESSING
-        if self.state_machine and self.state_machine.can_transition_to(DenverState.PROCESSING):
-            await self.state_machine.transition_to(
-                DenverState.PROCESSING,
-                reason=f"Processing command: '{normalized}'",
-            )
+        intent: CommandIntent | None = None
+        try:
+            # 4. State transition: -> PROCESSING
+            if self.state_machine and self.state_machine.current_state != DenverState.PROCESSING:
+                if not self.state_machine.can_transition_to(DenverState.PROCESSING):
+                    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    cur_state = self.state_machine.current_state.value
+                    logger.warning(
+                        "Command rejected: state machine currently in '%s', cannot transition to PROCESSING",
+                        cur_state,
+                    )
+                    # Best-effort event & audit logging
+                    try:
+                        await self.event_bus.publish(
+                            CommandFailed(
+                                action_name="unknown",
+                                reason="StateConflict",
+                                error=f"Busy in state {cur_state}",
+                            )
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to publish CommandFailed event during busy rejection: %s", exc)
+                    try:
+                        await self.memory.log_audit(
+                            raw_command=req.raw_text,
+                            routed_action="unknown",
+                            provider_used="rules",
+                            status="busy",
+                            latency_ms=elapsed_ms,
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to write audit log during busy rejection: %s", exc)
 
-        # 5. Intent Routing (Tier 1: Deterministic)
-        intent = self.router.route(normalized)
-        await self.event_bus.publish(
-            CommandRouted(
-                intent_name=intent.intent_name,
-                action_name=intent.action_name,
-                category=intent.category.value,
-                confidence=intent.confidence,
-                risk_level=intent.risk_level.value,
-            )
-        )
+                    response = CommandResponse(
+                        success=False,
+                        message=f"I'm currently busy ({cur_state}). Please wait a moment and try again.",
+                        action_name=None,
+                        data={"current_state": cur_state, "rejection_reason": "StateConflict"},
+                        risk_level=CommandRiskLevel.LOW,
+                        confidence=0.0,
+                        latency_ms=elapsed_ms,
+                        error="BusyProcessing",
+                    )
+                    self.memory.add_conversation_turn(role="denver", content=response.message)
+                    return response
 
-        # Record command habit
-        if normalized:
-            await self.memory.record_habit(normalized)
-
-        # 5b. Sleep Mode Gate: Stay dormant unless waking up
-        if getattr(self, "_is_sleeping", False):
-            if intent.action_name == "wake_up" or "wake up" in normalized or "wake" in normalized:
-                self._is_sleeping = False
-                res = await self._handle_wake_up({})
-                elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-                    await self.state_machine.transition_to(DenverState.STANDBY, reason="Woke up from sleep mode")
-                resp = CommandResponse(
-                    success=True,
-                    message=res.message,
-                    action_name="wake_up",
-                    data=res.data,
-                    risk_level=CommandRiskLevel.SAFE,
-                    confidence=1.0,
-                    latency_ms=elapsed_ms,
-                )
-                self.memory.add_conversation_turn(role="denver", content=resp.message)
-                return resp
-            else:
-                elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-                    await self.state_machine.transition_to(DenverState.STANDBY, reason="Silent while in sleep mode")
-                return CommandResponse(
-                    success=True,
-                    message="",
-                    action_name="sleeping",
-                    data={"is_sleeping": True},
-                    risk_level=CommandRiskLevel.SAFE,
-                    confidence=1.0,
-                    latency_ms=elapsed_ms,
+                await self.state_machine.transition_to(
+                    DenverState.PROCESSING,
+                    reason=f"Processing command: '{normalized}'",
                 )
 
-        # 6. Check for Unsupported/Unknown Intent -> Check Plugins then AI FALLBACK
-        if intent.intent_name == "unknown" or intent.action_name == "unknown":
-            # Check if an active plugin can handle this command utterance
-            plugin_res = self.plugin_registry.dispatch_command(normalized or req.raw_text)
-            if plugin_res:
-                elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-                    await self.state_machine.transition_to(DenverState.STANDBY, reason="Plugin handled command")
-                resp = CommandResponse(
-                    success=True,
-                    message=plugin_res,
-                    action_name="plugin_command",
-                    data={"plugin_handled": True},
-                    risk_level=CommandRiskLevel.LOW,
-                    confidence=1.0,
-                    latency_ms=elapsed_ms,
-                )
-                self.memory.add_conversation_turn(role="denver", content=resp.message)
-                return resp
-
-            return await self._process_ai_fallback(req, normalized, start_time)
-
-        # 7. Safety Validation
-        action_request = ActionRequest(
-            action_name=intent.action_name,
-            params=intent.params,
-            risk_level=intent.risk_level,
-            requires_confirmation=intent.requires_confirmation,
-        )
-
-        is_safe, safety_err = self.safety.validate(action_request)
-        if not is_safe:
-            elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            logger.warning("Action '%s' blocked by safety policy: %s", intent.action_name, safety_err)
-            if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-                await self.state_machine.transition_to(DenverState.STANDBY, reason="Safety violation aborted")
-
+            # 5. Intent Routing (Tier 1: Deterministic)
+            intent = self.router.route(normalized)
             await self.event_bus.publish(
-                CommandFailed(action_name=intent.action_name, reason="SafetyBlocked", error=safety_err or "")
+                CommandRouted(
+                    intent_name=intent.intent_name,
+                    action_name=intent.action_name,
+                    category=intent.category.value,
+                    confidence=intent.confidence,
+                    risk_level=intent.risk_level.value,
+                )
             )
-            await self.memory.log_audit(
-                raw_command=req.raw_text,
-                routed_action=intent.action_name,
-                provider_used="rules",
-                status="blocked",
-                latency_ms=elapsed_ms,
+
+            # Record command habit (non-blocking storage safeguard)
+            if normalized:
+                try:
+                    await self.memory.record_habit(normalized)
+                except Exception as exc:
+                    logger.warning("Failed to record command habit due to storage error: %s", exc)
+
+            # 5b. Sleep Mode Gate: Stay dormant unless waking up
+            if getattr(self, "_is_sleeping", False):
+                if intent.action_name == "wake_up" or "wake up" in normalized or "wake" in normalized:
+                    self._is_sleeping = False
+                    res = await self._handle_wake_up({})
+                    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                        await self.state_machine.transition_to(DenverState.STANDBY, reason="Woke up from sleep mode")
+                    resp = CommandResponse(
+                        success=True,
+                        message=res.message,
+                        action_name="wake_up",
+                        data=res.data,
+                        risk_level=CommandRiskLevel.SAFE,
+                        confidence=1.0,
+                        latency_ms=elapsed_ms,
+                    )
+                    self.memory.add_conversation_turn(role="denver", content=resp.message)
+                    return resp
+                else:
+                    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                        await self.state_machine.transition_to(DenverState.STANDBY, reason="Silent while in sleep mode")
+                    return CommandResponse(
+                        success=True,
+                        message="",
+                        action_name="sleeping",
+                        data={"is_sleeping": True},
+                        risk_level=CommandRiskLevel.SAFE,
+                        confidence=1.0,
+                        latency_ms=elapsed_ms,
+                    )
+
+            # 6. Check for Unsupported/Unknown Intent -> Check Corrections -> Plugins -> AI FALLBACK
+            if intent.intent_name == "unknown" or intent.action_name == "unknown":
+                # Check if user is issuing an explicit behavioral correction (Pillar 3)
+                if hasattr(self.memory, "corrections"):
+                    corr_detected = self.memory.corrections.detect_correction(normalized or req.raw_text)
+                    if corr_detected:
+                        saved_corr = await self.memory.add_user_correction(
+                            pattern=corr_detected["pattern"],
+                            correction=corr_detected["correction"],
+                            target_domain=corr_detected.get("target_domain", "general"),
+                            priority=corr_detected.get("priority", 15),
+                        )
+                        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                        if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                            await self.state_machine.transition_to(DenverState.STANDBY, reason="Recorded user correction")
+                        resp = CommandResponse(
+                            success=True,
+                            message=f"Understood. I have recorded this correction: '{saved_corr.correction}'. I will remember this for future actions.",
+                            action_name="record_user_correction",
+                            data=saved_corr.to_dict(),
+                            risk_level=CommandRiskLevel.SAFE,
+                            confidence=1.0,
+                            latency_ms=elapsed_ms,
+                        )
+                        self.memory.add_conversation_turn(role="denver", content=resp.message)
+                        return resp
+
+                # Check if an active plugin can handle this command utterance
+                plugin_res = self.plugin_registry.dispatch_command(normalized or req.raw_text)
+
+                if plugin_res:
+                    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                        await self.state_machine.transition_to(DenverState.STANDBY, reason="Plugin handled command")
+                    resp = CommandResponse(
+                        success=True,
+                        message=plugin_res,
+                        action_name="plugin_command",
+                        data={"plugin_handled": True},
+                        risk_level=CommandRiskLevel.LOW,
+                        confidence=1.0,
+                        latency_ms=elapsed_ms,
+                    )
+                    self.memory.add_conversation_turn(role="denver", content=resp.message)
+                    return resp
+
+                return await self._process_ai_fallback(req, normalized, start_time)
+
+            # 7. Safety Validation
+            action_request = ActionRequest(
+                action_name=intent.action_name,
+                params=intent.params,
+                risk_level=intent.risk_level,
+                requires_confirmation=intent.requires_confirmation,
             )
+
+            is_safe, safety_err = self.safety.validate(action_request)
+            if not is_safe:
+                elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                logger.warning("Action '%s' blocked by safety policy: %s", intent.action_name, safety_err)
+                if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                    await self.state_machine.transition_to(DenverState.STANDBY, reason="Safety violation aborted")
+
+                await self.event_bus.publish(
+                    CommandFailed(action_name=intent.action_name, reason="SafetyBlocked", error=safety_err or "")
+                )
+                try:
+                    await self.memory.log_audit(
+                        raw_command=req.raw_text,
+                        routed_action=intent.action_name,
+                        provider_used="rules",
+                        status="blocked",
+                        latency_ms=elapsed_ms,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to write safety audit log due to storage error: %s", exc)
+
+                response = CommandResponse(
+                    success=False,
+                    message=f"Action '{intent.action_name}' was blocked: {safety_err}",
+                    action_name=intent.action_name,
+                    data={"safety_violation": safety_err},
+                    risk_level=CommandRiskLevel.BLOCKED,
+                    confidence=intent.confidence,
+                    latency_ms=elapsed_ms,
+                    error=safety_err,
+                )
+                self.memory.add_conversation_turn(role="denver", content=response.message)
+                return response
+
+            # 8. State transition: -> EXECUTING
+            if self.state_machine and self.state_machine.can_transition_to(DenverState.EXECUTING):
+                await self.state_machine.transition_to(
+                    DenverState.EXECUTING,
+                    reason=f"Executing action: '{intent.action_name}'",
+                )
+
+            # 9. Action Execution
+            await self.event_bus.publish(
+                CommandExecutionStarted(
+                    action_name=action_request.action_name,
+                    risk_level=action_request.risk_level.value,
+                )
+            )
+
+            result = await self.executor.execute(action_request)
+            
+            # If application was rejected because target is not in allowlist (e.g. natural language sentence),
+            # automatically fallback to AI Multi-Model LLM!
+            if (
+                not result.success
+                and result.error == "ApplicationNotAllowlisted"
+                and self.settings.ai_enabled
+                and self.provider_router is not None
+            ):
+                logger.info("Unrecognized application target '%s'; seamlessly falling back to AI Engine.", action_request.params.get("application"))
+                return await self._process_ai_fallback(req, normalized, start_time)
+
+            elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+            # 10. State transition: -> STANDBY
+            if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
+                await self.state_machine.transition_to(DenverState.STANDBY, reason="Execution complete")
+
+            # 11. Structured Audit Log & Events
+            status_str = "success" if result.success else "failed"
+            try:
+                await self.memory.log_audit(
+                    raw_command=req.raw_text,
+                    routed_action=intent.action_name,
+                    provider_used="rules",
+                    status=status_str,
+                    latency_ms=elapsed_ms,
+                )
+            except Exception as exc:
+                logger.warning("Failed to write execution audit log due to storage error: %s", exc)
+
+            if result.success:
+                await self.event_bus.publish(
+                    CommandExecutionCompleted(
+                        action_name=intent.action_name,
+                        success=True,
+                        latency_ms=elapsed_ms,
+                    )
+                )
+            else:
+                await self.event_bus.publish(
+                    CommandFailed(
+                        action_name=intent.action_name,
+                        reason="ExecutionError",
+                        error=result.error or "",
+                    )
+                )
 
             response = CommandResponse(
-                success=False,
-                message=f"Action '{intent.action_name}' was blocked: {safety_err}",
+                success=result.success,
+                message=result.message,
                 action_name=intent.action_name,
-                data={"safety_violation": safety_err},
-                risk_level=CommandRiskLevel.BLOCKED,
+                data=result.data,
+                risk_level=intent.risk_level,
                 confidence=intent.confidence,
                 latency_ms=elapsed_ms,
-                error=safety_err,
+                error=result.error,
             )
             self.memory.add_conversation_turn(role="denver", content=response.message)
             return response
-
-        # 8. State transition: -> EXECUTING
-        if self.state_machine and self.state_machine.can_transition_to(DenverState.EXECUTING):
-            await self.state_machine.transition_to(
-                DenverState.EXECUTING,
-                reason=f"Executing action: '{intent.action_name}'",
+        except InvalidStateTransitionError as exc:
+            elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            cur_state = self.state_machine.current_state.value if self.state_machine else "unknown"
+            logger.warning(
+                "Command rejected due to illegal state transition: %s (current state: %s)",
+                exc,
+                cur_state,
             )
-
-        # 9. Action Execution
-        await self.event_bus.publish(
-            CommandExecutionStarted(
-                action_name=action_request.action_name,
-                risk_level=action_request.risk_level.value,
-            )
-        )
-
-        result = await self.executor.execute(action_request)
-        
-        # If application was rejected because target is not in allowlist (e.g. natural language sentence),
-        # automatically fallback to AI Multi-Model LLM!
-        if (
-            not result.success
-            and result.error == "ApplicationNotAllowlisted"
-            and self.settings.ai_enabled
-            and self.provider_router is not None
-        ):
-            logger.info("Unrecognized application target '%s'; seamlessly falling back to AI Engine.", action_request.params.get("application"))
-            return await self._process_ai_fallback(req, normalized, start_time)
-
-        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-
-        # 10. State transition: -> STANDBY
-        if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-            await self.state_machine.transition_to(DenverState.STANDBY, reason="Execution complete")
-
-        # 11. Structured Audit Log & Events
-        status_str = "success" if result.success else "failed"
-        await self.memory.log_audit(
-            raw_command=req.raw_text,
-            routed_action=intent.action_name,
-            provider_used="rules",
-            status=status_str,
-            latency_ms=elapsed_ms,
-        )
-
-        if result.success:
-            await self.event_bus.publish(
-                CommandExecutionCompleted(
-                    action_name=intent.action_name,
-                    success=True,
+            try:
+                await self.event_bus.publish(
+                    CommandFailed(action_name="unknown", reason="StateConflict", error=str(exc))
+                )
+            except Exception as ev_exc:
+                logger.warning("Failed to publish CommandFailed event during state transition error: %s", ev_exc)
+            try:
+                await self.memory.log_audit(
+                    raw_command=req.raw_text,
+                    routed_action="unknown",
+                    provider_used="rules",
+                    status="busy",
                     latency_ms=elapsed_ms,
                 )
+            except Exception as log_exc:
+                logger.warning("Failed to write audit log during state transition error: %s", log_exc)
+
+            response = CommandResponse(
+                success=False,
+                message=f"I'm currently busy ({cur_state}). Please wait a moment and try again.",
+                action_name=None,
+                data={"current_state": cur_state, "error": str(exc)},
+                risk_level=CommandRiskLevel.LOW,
+                confidence=0.0,
+                latency_ms=elapsed_ms,
+                error="BusyProcessing",
             )
-        else:
-            await self.event_bus.publish(
-                CommandFailed(
-                    action_name=intent.action_name,
-                    reason="ExecutionError",
-                    error=result.error or "",
+            self.memory.add_conversation_turn(role="denver", content=response.message)
+            return response
+        except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            logger.exception("Unexpected error while processing command '%s': %s", req.raw_text, exc)
+            action_name = intent.action_name if intent else "unknown"
+
+            # Best-effort event publish & audit log for full audit trail consistency
+            try:
+                await self.event_bus.publish(
+                    CommandFailed(
+                        action_name=action_name,
+                        reason="UnhandledException",
+                        error=str(exc),
+                    )
                 )
+            except Exception as ev_exc:
+                logger.warning("Failed to publish CommandFailed event during error handling: %s", ev_exc)
+
+            try:
+                await self.memory.log_audit(
+                    raw_command=req.raw_text,
+                    routed_action=action_name,
+                    provider_used="rules",
+                    status="failed",
+                    latency_ms=elapsed_ms,
+                )
+            except Exception as log_exc:
+                logger.warning("Failed to write audit log during error handling: %s", log_exc)
+
+            response = CommandResponse(
+                success=False,
+                message=f"An unexpected error occurred while processing command: {exc}",
+                action_name=None,
+                data={"error": str(exc)},
+                risk_level=CommandRiskLevel.HIGH,
+                confidence=0.0,
+                latency_ms=elapsed_ms,
+                error=str(exc),
+            )
+            self.memory.add_conversation_turn(role="denver", content=response.message)
+            return response
+        finally:
+            if getattr(req, "source", "") != "voice" and self.state_machine and self.state_machine.current_state in {
+                DenverState.PROCESSING,
+                DenverState.EXECUTING,
+            }:
+                if self.state_machine.can_transition_to(DenverState.STANDBY):
+                    try:
+                        await self.state_machine.transition_to(
+                            DenverState.STANDBY,
+                            reason="Command processing finished (lifecycle reset safeguard)",
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to reset state machine to STANDBY in finally safeguard: %s", exc)
+
+    def is_ai_command(self, command_text: str | CommandRequest) -> bool:
+        """Determine if a command requires AI fallback rather than deterministic rules or plugins."""
+        if not self.settings.ai_enabled or self.provider_router is None:
+            return False
+        raw_text = command_text.raw_text if isinstance(command_text, CommandRequest) else str(command_text)
+        normalized = self.normalizer.normalize(raw_text)
+        intent = self.router.route(normalized)
+        if intent.intent_name == "unknown" or intent.action_name == "unknown":
+            plugin_res = self.plugin_registry.dispatch_command(normalized or raw_text)
+            if not plugin_res:
+                return True
+        return False
+
+    async def stream_ai_tokens(
+        self,
+        command_text: str | CommandRequest,
+        context: CommandContext | None = None,
+    ):
+        """Stream response tokens for conversational AI queries while maintaining memory & audits."""
+        start_time = time.perf_counter()
+        if isinstance(command_text, CommandRequest):
+            req = command_text
+        else:
+            req = CommandRequest(
+                raw_text=str(command_text),
+                source="voice",
+                context=context or CommandContext(),
             )
 
-        response = CommandResponse(
-            success=result.success,
-            message=result.message,
-            action_name=intent.action_name,
-            data=result.data,
-            risk_level=intent.risk_level,
-            confidence=intent.confidence,
-            latency_ms=elapsed_ms,
-            error=result.error,
+        self.memory.add_conversation_turn(role="user", content=req.raw_text)
+        await self.event_bus.publish(CommandReceived(command_text=req.raw_text, source=req.source))
+
+        normalized = self.normalizer.normalize(req.raw_text)
+        await self.event_bus.publish(
+            CommandNormalized(raw_text=req.raw_text, normalized_text=normalized)
         )
-        self.memory.add_conversation_turn(role="denver", content=response.message)
-        return response
+
+        if self.state_machine and self.state_machine.can_transition_to(DenverState.PROCESSING):
+            await self.state_machine.transition_to(
+                DenverState.PROCESSING,
+                reason=f"Streaming AI response for: '{normalized}'",
+            )
+
+        if not self.settings.ai_enabled or self.provider_router is None:
+            msg = "AI capabilities are currently disabled."
+            yield msg
+            return
+
+        ordered_providers = self.provider_router.get_ordered_providers()
+        first_is_cloud = (ordered_providers[0].provider_type.value == "cloud") if ordered_providers else False
+        recent_screen = self.vision_engine.get_recent_screen_context() if hasattr(self, "vision_engine") else None
+        context_bundle = await self.context_engine.build_context(
+            query=req.raw_text,
+            is_cloud=first_is_cloud,
+            active_screen_context=recent_screen,
+        )
+        tools = self._get_tool_definitions()
+
+        provider_req = ProviderRequest(
+            messages=[{"role": "user", "content": req.raw_text}],
+            tools=tools,
+            context_summary=context_bundle.context_string,
+            temperature=0.7,
+        )
+
+        accumulated: list[str] = []
+        try:
+            async for token in self.provider_router.stream_generate(provider_req):
+                accumulated.append(token)
+                yield token
+        except Exception as exc:
+            logger.warning("Error during AI token streaming: %s", exc)
+
+        full_text = "".join(accumulated).strip()
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        if full_text:
+            self.memory.add_conversation_turn(role="denver", content=full_text)
+            active_prov = getattr(self.provider_router, "active_provider", "ai")
+            await self.memory.log_audit(
+                raw_command=req.raw_text,
+                routed_action="ai_chat_streaming",
+                provider_used=active_prov,
+                status="success",
+                latency_ms=elapsed_ms,
+            )
+

@@ -417,3 +417,49 @@ class TaskPersistence:
                 )
             )
         return executions
+
+    def reconcile_orphaned_tasks(self) -> int:
+        """Atomically mark any orphaned in-flight tasks and executions as FAILED on startup/recovery."""
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        reason = "System restarted while task was in-flight (crash/reboot recovery)"
+
+        conn.execute("BEGIN IMMEDIATE;")
+        try:
+            # 1. Update orphaned step executions
+            conn.execute(
+                """
+                UPDATE step_executions
+                SET status = ?, completed_at = ?, error_message = ?
+                WHERE status = ?;
+                """,
+                (StepStatus.FAILED.value, now, reason, StepStatus.RUNNING.value),
+            )
+
+            # 2. Update orphaned task executions
+            conn.execute(
+                """
+                UPDATE task_executions
+                SET status = ?, completed_at = ?, error_summary = ?
+                WHERE status = ?;
+                """,
+                (TaskStatus.FAILED.value, now, reason, TaskStatus.RUNNING.value),
+            )
+
+            # 3. Update orphaned tasks
+            cursor = conn.execute(
+                """
+                UPDATE orchestrated_tasks
+                SET status = ?, updated_at = ?
+                WHERE status = ?;
+                """,
+                (TaskStatus.FAILED.value, now, TaskStatus.RUNNING.value),
+            )
+            conn.execute("COMMIT;")
+            count = cursor.rowcount
+            if count > 0:
+                logger.warning("Reconciled %d orphaned RUNNING task(s) to FAILED on startup.", count)
+            return count
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise

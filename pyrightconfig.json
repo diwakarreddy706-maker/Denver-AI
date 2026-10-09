@@ -1,0 +1,11 @@
+{
+  "include": [
+    "src",
+    "tests"
+  ],
+  "extraPaths": [
+    "src",
+    "C:/Users/diwak/AppData/Local/Programs/Python/Python314/Lib/site-packages"
+  ],
+  "pythonPath": "C:/Users/diwak/AppData/Local/Programs/Python/Python314/python.exe"
+}

@@ -145,3 +145,33 @@ async def test_voice_pipeline_speech_processing_turn(voice_env) -> None:
     assert len(transcripts) == 1
     assert transcripts[0].text == "Denver, what time is it?"
     assert state_machine.current_state == DenverState.STANDBY
+
+
+@pytest.mark.asyncio
+async def test_voice_pipeline_mute_and_overlay_notification(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+
+    # Initial state
+    assert not pipeline.is_muted
+
+    # Mute
+    pipeline.mute()
+    assert bool(pipeline.is_muted)
+
+    # Unmute
+    pipeline.unmute()
+    assert not pipeline.is_muted
+
+    # Toggle mute
+    muted = pipeline.toggle_mute()
+    assert bool(muted)
+    assert bool(pipeline.is_muted)
+
+    pipeline.unmute()
+
+    # Test overlay notification calls without error
+    pipeline._notify_overlay("LISTENING")
+    pipeline._notify_overlay("PROCESSING")
+    pipeline._notify_overlay("SPEAKING")
+    pipeline._notify_overlay("STANDBY")
+

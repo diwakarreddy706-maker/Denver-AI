@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
     from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient
     from PySide6.QtWidgets import QWidget
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QWidget = object  # type: ignore
-    Signal = lambda *args: None  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+        from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient
+        from PySide6.QtWidgets import QWidget
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QWidget = object
+        Signal = lambda *args: None
 
 from denver.runtime.states import DenverState
 from denver.ui.theme import (

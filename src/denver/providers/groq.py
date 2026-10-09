@@ -35,7 +35,7 @@ class GroqProvider(AIProvider):
         self,
         vault: DenverVault | None = None,
         base_url: str = "https://api.groq.com/openai/v1",
-        default_model: str = "llama-3.1-8b-instant",
+        default_model: str = "llama-3.3-70b-versatile",
         enabled: bool = True,
         timeout_seconds: float = 10.0,
     ) -> None:
@@ -185,14 +185,34 @@ class GroqProvider(AIProvider):
             "max_tokens": request.max_tokens,
         }
         if request.tools:
-            payload["tools"] = [t.to_schema() for t in request.tools]
+            # Groq API limits tools array to a maximum of 128 items
+            payload["tools"] = [t.to_schema() for t in request.tools[:128]]
             payload["tool_choice"] = "auto"
 
         url = f"{self.base_url}/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}"}
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Denver-AI-Assistant/1.0",
+        }
 
         try:
-            res_data = await asyncio.to_thread(_http_request, url, payload, headers, self.timeout_seconds)
+            try:
+                res_data = await asyncio.to_thread(_http_request, url, payload, headers, self.timeout_seconds)
+            except urllib.error.HTTPError as http_err:
+                err_msg = ""
+                try:
+                    err_msg = http_err.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+                logger.error("Groq generation request failed: %s %s: %s", http_err.code, http_err.reason, err_msg)
+                if http_err.code == 404:
+                    raise RuntimeError(
+                        f"Groq model '{payload['model']}' not found (HTTP 404). "
+                        "Please configure a supported model such as 'llama-3.3-70b-versatile' in settings.py / .env."
+                    ) from http_err
+                raise
+
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
             choices = res_data.get("choices", [])
@@ -227,7 +247,7 @@ class GroqProvider(AIProvider):
             return ProviderResponse(
                 text=content,
                 tool_calls=tool_calls,
-                model_name=self.default_model,
+                model_name=payload["model"],
                 provider_name=self.name,
                 latency_ms=elapsed_ms,
                 token_usage={
@@ -241,3 +261,84 @@ class GroqProvider(AIProvider):
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
             logger.error("Groq generation request failed: %s", exc)
             raise RuntimeError(f"Groq API error: {exc}") from exc
+
+    async def stream_generate(self, request: ProviderRequest):
+        """Stream tokens incrementally from Groq chat completion endpoint."""
+        api_key = self._get_api_key()
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not configured in Denver Vault.")
+
+        raw_system_prompt = request.system_prompt or build_system_prompt(
+            context_summary=request.context_summary,
+            available_tools=None if request.tools else request.tools,
+            is_cloud=True,
+        )
+        system_prompt = sanitize_text_for_cloud(raw_system_prompt)
+        sanitized_messages = sanitize_messages_for_cloud(request.messages)
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}] + sanitized_messages
+
+        model_name = self.default_model
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "stream": True,
+        }
+
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Denver-AI-Assistant/1.0",
+        }
+
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _fetch_stream(current_model: str):
+            payload["model"] = current_model
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8").strip()
+                        if not line:
+                            continue
+                        if line == "data: [DONE]":
+                            break
+                        if line.startswith("data: "):
+                            try:
+                                chunk = json.loads(line[6:])
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    loop.call_soon_threadsafe(queue.put_nowait, content)
+                            except Exception:
+                                pass
+            except urllib.error.HTTPError as http_err:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+                if http_err.code == 404:
+                    raise RuntimeError(
+                        f"Groq model '{current_model}' not found (HTTP 404). "
+                        "Please configure a supported model such as 'openai/gpt-oss-20b' in settings.py / .env."
+                    ) from http_err
+                raise
+            except Exception as exc:
+                logger.error("Error reading Groq token stream: %s", exc)
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+                raise
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        task = asyncio.create_task(asyncio.to_thread(_fetch_stream, model_name))
+
+        try:
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                yield token
+        finally:
+            if not task.done():
+                task.cancel()

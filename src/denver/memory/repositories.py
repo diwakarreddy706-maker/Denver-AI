@@ -12,14 +12,17 @@ from denver.memory.models import (
     AuditRecord,
     CachedLocation,
     CommandHabit,
+    LearnedHabit,
     MemoryCategory,
     MemoryItem,
     Note,
     PrivacyLevel,
     SavedLocation,
     Task,
+    UserCorrection,
     UserPreference,
 )
+from denver.memory.database import sanitize_fts_query
 
 
 def _parse_dt(val: Any) -> datetime | None:
@@ -218,26 +221,71 @@ class MemoryItemRepository:
         return [self._row_to_item(r) for r in cursor.fetchall()]
 
     def search(self, query: str, category: str | None = None, limit: int = 20) -> list[MemoryItem]:
-        pattern = f"%{query}%"
+        query_clean = query.strip()
+        if not query_clean:
+            return []
+
         cols = """
+            m.id, m.category, m.key, m.content, m.privacy_level, m.metadata, m.created_at, m.updated_at,
+            m.importance, m.confidence, m.source, m.expires_at, m.last_accessed_at, m.embedding_status, m.embedding_model, m.is_deleted
+        """
+        clean_cat = category.strip().lower() if category else None
+
+        # 1. Try FTS5 BM25 ranked search
+        fts_query = sanitize_fts_query(query_clean)
+        if fts_query:
+            try:
+                if clean_cat:
+                    cursor = self.conn.execute(
+                        f"""
+                        SELECT {cols}
+                        FROM memory_items m
+                        JOIN memory_items_fts fts ON m.id = fts.rowid
+                        WHERE memory_items_fts MATCH ? AND m.category = ? AND m.is_deleted = 0
+                        ORDER BY fts.rank
+                        LIMIT ?;
+                        """,
+                        (fts_query, clean_cat, limit),
+                    )
+                else:
+                    cursor = self.conn.execute(
+                        f"""
+                        SELECT {cols}
+                        FROM memory_items m
+                        JOIN memory_items_fts fts ON m.id = fts.rowid
+                        WHERE memory_items_fts MATCH ? AND m.is_deleted = 0
+                        ORDER BY fts.rank
+                        LIMIT ?;
+                        """,
+                        (fts_query, limit),
+                    )
+                rows = cursor.fetchall()
+                if rows:
+                    return [self._row_to_item(r) for r in rows]
+            except Exception:
+                pass
+
+        # 2. Fallback to LIKE scan if FTS returned 0 results or is unavailable
+        pattern = f"%{query_clean}%"
+        fallback_cols = """
             id, category, key, content, privacy_level, metadata, created_at, updated_at,
             importance, confidence, source, expires_at, last_accessed_at, embedding_status, embedding_model, is_deleted
         """
-        if category:
+        if clean_cat:
             cursor = self.conn.execute(
                 f"""
-                SELECT {cols}
+                SELECT {fallback_cols}
                 FROM memory_items
                 WHERE category = ? AND (key LIKE ? OR content LIKE ?) AND is_deleted = 0
                 ORDER BY updated_at DESC
                 LIMIT ?;
                 """,
-                (category.strip().lower(), pattern, pattern, limit),
+                (clean_cat, pattern, pattern, limit),
             )
         else:
             cursor = self.conn.execute(
                 f"""
-                SELECT {cols}
+                SELECT {fallback_cols}
                 FROM memory_items
                 WHERE (key LIKE ? OR content LIKE ?) AND is_deleted = 0
                 ORDER BY updated_at DESC
@@ -464,7 +512,33 @@ class NotesRepository:
         return [self._row_to_note(r) for r in cursor.fetchall()]
 
     def search_notes(self, query: str, limit: int = 20) -> list[Note]:
-        pattern = f"%{query}%"
+        query_clean = query.strip()
+        if not query_clean:
+            return []
+
+        # 1. Try FTS5 BM25 ranked search
+        fts_query = sanitize_fts_query(query_clean)
+        if fts_query:
+            try:
+                cursor = self.conn.execute(
+                    """
+                    SELECT n.id, n.title, n.content, n.tags, n.is_pinned, n.created_at, n.updated_at
+                    FROM notes n
+                    JOIN notes_fts fts ON n.id = fts.rowid
+                    WHERE notes_fts MATCH ?
+                    ORDER BY fts.rank
+                    LIMIT ?;
+                    """,
+                    (fts_query, limit),
+                )
+                rows = cursor.fetchall()
+                if rows:
+                    return [self._row_to_note(r) for r in rows]
+            except Exception:
+                pass
+
+        # 2. Fallback to LIKE scan if FTS returned 0 results or is unavailable
+        pattern = f"%{query_clean}%"
         cursor = self.conn.execute(
             """
             SELECT id, title, content, tags, is_pinned, created_at, updated_at
@@ -622,13 +696,14 @@ class AuditLogRepository:
         status: str,
         latency_ms: float,
     ) -> AuditRecord:
+        safe_provider = str(provider_used or "rules")
         cursor = self.conn.execute(
             """
             INSERT INTO command_audit_log (raw_command, routed_action, provider_used, status, latency_ms, created_at)
             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             RETURNING id, raw_command, routed_action, provider_used, status, latency_ms, created_at;
             """,
-            (raw_command, routed_action, provider_used, status, latency_ms),
+            (raw_command, routed_action, safe_provider, status, latency_ms),
         )
         row = cursor.fetchone()
         return AuditRecord(
@@ -823,4 +898,263 @@ class LocationCacheRepository:
         """Clear the location cache table."""
         cursor = self.conn.execute("DELETE FROM location_cache;")
         return cursor.rowcount
+
+
+class UserCorrectionsRepository:
+    """Repository for managing user corrections and behavioral overrides."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def add_correction(
+        self,
+        pattern: str,
+        correction: str,
+        target_domain: str = "general",
+        priority: int = 10,
+    ) -> UserCorrection:
+        """Insert or update a user correction."""
+        cursor = self.conn.execute(
+            """
+            INSERT INTO user_corrections (pattern, correction, target_domain, priority, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id, pattern, correction, target_domain, priority, is_active, created_at, updated_at;
+            """,
+            (pattern.strip(), correction.strip(), target_domain.strip().lower(), priority),
+        )
+        row = cursor.fetchone()
+        return UserCorrection(
+            id=row[0],
+            pattern=row[1],
+            correction=row[2],
+            target_domain=row[3],
+            priority=row[4],
+            is_active=bool(row[5]),
+            created_at=_parse_dt(row[6]) or datetime.now(timezone.utc),
+            updated_at=_parse_dt(row[7]) or datetime.now(timezone.utc),
+        )
+
+    def get_active_corrections(self, target_domain: str | None = None) -> list[UserCorrection]:
+        """Fetch all active user corrections, optionally filtered by domain, ordered by priority desc."""
+        if target_domain:
+            cursor = self.conn.execute(
+                """
+                SELECT id, pattern, correction, target_domain, priority, is_active, created_at, updated_at
+                FROM user_corrections
+                WHERE is_active = 1 AND (target_domain = ? OR target_domain = 'general')
+                ORDER BY priority DESC, created_at DESC;
+                """,
+                (target_domain.strip().lower(),),
+            )
+        else:
+            cursor = self.conn.execute(
+                """
+                SELECT id, pattern, correction, target_domain, priority, is_active, created_at, updated_at
+                FROM user_corrections
+                WHERE is_active = 1
+                ORDER BY priority DESC, created_at DESC;
+                """
+            )
+        return [
+            UserCorrection(
+                id=r[0],
+                pattern=r[1],
+                correction=r[2],
+                target_domain=r[3],
+                priority=r[4],
+                is_active=bool(r[5]),
+                created_at=_parse_dt(r[6]) or datetime.now(timezone.utc),
+                updated_at=_parse_dt(r[7]) or datetime.now(timezone.utc),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def list_corrections(self, include_inactive: bool = False, limit: int = 50) -> list[UserCorrection]:
+        """List user corrections."""
+        where_clause = "" if include_inactive else "WHERE is_active = 1"
+        cursor = self.conn.execute(
+            f"""
+            SELECT id, pattern, correction, target_domain, priority, is_active, created_at, updated_at
+            FROM user_corrections
+            {where_clause}
+            ORDER BY priority DESC, created_at DESC
+            LIMIT ?;
+            """,
+            (limit,),
+        )
+        return [
+            UserCorrection(
+                id=r[0],
+                pattern=r[1],
+                correction=r[2],
+                target_domain=r[3],
+                priority=r[4],
+                is_active=bool(r[5]),
+                created_at=_parse_dt(r[6]) or datetime.now(timezone.utc),
+                updated_at=_parse_dt(r[7]) or datetime.now(timezone.utc),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def get_correction(self, correction_id: int) -> UserCorrection | None:
+        """Get a single user correction by ID."""
+        cursor = self.conn.execute(
+            """
+            SELECT id, pattern, correction, target_domain, priority, is_active, created_at, updated_at
+            FROM user_corrections
+            WHERE id = ?;
+            """,
+            (correction_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return UserCorrection(
+            id=row[0],
+            pattern=row[1],
+            correction=row[2],
+            target_domain=row[3],
+            priority=row[4],
+            is_active=bool(row[5]),
+            created_at=_parse_dt(row[6]) or datetime.now(timezone.utc),
+            updated_at=_parse_dt(row[7]) or datetime.now(timezone.utc),
+        )
+
+    def deactivate_correction(self, correction_id: int) -> bool:
+        """Deactivate a correction instead of hard deleting."""
+        cursor = self.conn.execute(
+            "UPDATE user_corrections SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            (correction_id,),
+        )
+        return cursor.rowcount > 0
+
+    def delete_correction(self, correction_id: int) -> bool:
+        """Permanently delete a correction by ID."""
+        cursor = self.conn.execute("DELETE FROM user_corrections WHERE id = ?;", (correction_id,))
+        return cursor.rowcount > 0
+
+    def clear_corrections(self) -> int:
+        """Delete all user corrections."""
+        cursor = self.conn.execute("DELETE FROM user_corrections;")
+        return cursor.rowcount
+
+
+class LearnedHabitsRepository:
+    """Repository for recording observations and retrieving inferred habits."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def record_observation(
+        self,
+        category: str,
+        habit_key: str,
+        habit_value: str,
+        confidence_boost: float = 0.1,
+    ) -> LearnedHabit:
+        """Record an observation, incrementing frequency and adjusting confidence."""
+        cat = category.strip().lower()
+        key = habit_key.strip().lower()
+        val = habit_value.strip()
+
+        cursor = self.conn.execute(
+            """
+            INSERT INTO learned_habits (category, habit_key, habit_value, frequency, confidence, last_observed_at)
+            VALUES (?, ?, ?, 1, 0.5, CURRENT_TIMESTAMP)
+            ON CONFLICT(habit_key) DO UPDATE SET
+                category = excluded.category,
+                habit_value = excluded.habit_value,
+                frequency = learned_habits.frequency + 1,
+                confidence = MIN(1.0, learned_habits.confidence + ?),
+                last_observed_at = CURRENT_TIMESTAMP
+            RETURNING id, category, habit_key, habit_value, frequency, confidence, last_observed_at;
+            """,
+            (cat, key, val, confidence_boost),
+        )
+        row = cursor.fetchone()
+        return LearnedHabit(
+            id=row[0],
+            category=row[1],
+            habit_key=row[2],
+            habit_value=row[3],
+            frequency=row[4],
+            confidence=float(row[5]),
+            last_observed_at=_parse_dt(row[6]) or datetime.now(timezone.utc),
+        )
+
+    def get_habit(self, habit_key: str) -> LearnedHabit | None:
+        """Retrieve a learned habit by key."""
+        cursor = self.conn.execute(
+            """
+            SELECT id, category, habit_key, habit_value, frequency, confidence, last_observed_at
+            FROM learned_habits
+            WHERE habit_key = ?;
+            """,
+            (habit_key.strip().lower(),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return LearnedHabit(
+            id=row[0],
+            category=row[1],
+            habit_key=row[2],
+            habit_value=row[3],
+            frequency=row[4],
+            confidence=float(row[5]),
+            last_observed_at=_parse_dt(row[6]) or datetime.now(timezone.utc),
+        )
+
+    def list_habits(
+        self,
+        category: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 50,
+    ) -> list[LearnedHabit]:
+        """List learned habits with optional category filter and minimum confidence."""
+        if category:
+            cursor = self.conn.execute(
+                """
+                SELECT id, category, habit_key, habit_value, frequency, confidence, last_observed_at
+                FROM learned_habits
+                WHERE category = ? AND confidence >= ?
+                ORDER BY frequency DESC, confidence DESC
+                LIMIT ?;
+                """,
+                (category.strip().lower(), min_confidence, limit),
+            )
+        else:
+            cursor = self.conn.execute(
+                """
+                SELECT id, category, habit_key, habit_value, frequency, confidence, last_observed_at
+                FROM learned_habits
+                WHERE confidence >= ?
+                ORDER BY frequency DESC, confidence DESC
+                LIMIT ?;
+                """,
+                (min_confidence, limit),
+            )
+        return [
+            LearnedHabit(
+                id=r[0],
+                category=r[1],
+                habit_key=r[2],
+                habit_value=r[3],
+                frequency=r[4],
+                confidence=float(r[5]),
+                last_observed_at=_parse_dt(r[6]) or datetime.now(timezone.utc),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def delete_habit(self, habit_id: int) -> bool:
+        """Delete a learned habit by ID."""
+        cursor = self.conn.execute("DELETE FROM learned_habits WHERE id = ?;", (habit_id,))
+        return cursor.rowcount > 0
+
+    def clear_habits(self) -> int:
+        """Delete all learned habits."""
+        cursor = self.conn.execute("DELETE FROM learned_habits;")
+        return cursor.rowcount
+
 

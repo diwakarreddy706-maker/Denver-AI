@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from denver.config.settings import DenverSettings
@@ -28,6 +28,7 @@ from denver.scheduler.errors import (
 )
 from denver.scheduler.execution_coordinator import RoutineExecutionCoordinator
 from denver.scheduler.models import (
+    ExecutionStatus,
     Routine,
     RoutineExecution,
     RoutineStatus,
@@ -217,22 +218,44 @@ class DenverScheduler:
         return due
 
     async def _process_due_routine(self, routine: Routine, reference_now: datetime) -> None:
-        """Execute a due routine and calculate its next scheduled run time."""
+        """Execute a due routine and calculate its next scheduled run time with backoff/failure cutoff."""
         try:
             execution = await self.coordinator.execute_routine(routine, trigger_type="scheduled")
-
-            # Compute next run time
             now_after_run = datetime.now(timezone.utc)
-            next_run = self.trigger_engine.compute_next_run(
-                trigger=routine.trigger,
-                after_dt=now_after_run,
-            )
 
             routine.last_run_at = now_after_run
             routine.last_status = execution.status.value
             routine.updated_at = now_after_run
 
-            if next_run:
+            if execution.status == ExecutionStatus.SUCCESS:
+                routine.failure_count = 0
+            elif execution.status in {
+                ExecutionStatus.FAILED,
+                ExecutionStatus.TIMEOUT,
+                ExecutionStatus.BLOCKED,
+                ExecutionStatus.CANCELLED,
+                ExecutionStatus.MISSED,
+            }:
+                routine.failure_count += 1
+
+            # Compute next run time
+            next_run = self.trigger_engine.compute_next_run(
+                trigger=routine.trigger,
+                after_dt=now_after_run,
+            )
+
+            # Failure cutoff: auto-pause if routine consecutively fails >= 5 times
+            if routine.failure_count >= 5:
+                routine.enabled = False
+                routine.status = RoutineStatus.PAUSED
+                routine.next_run_at = None
+                logger.error(
+                    "Routine '%s' (%s) exceeded consecutive failure threshold (%d). Auto-pausing routine.",
+                    routine.routine_id,
+                    routine.name,
+                    routine.failure_count,
+                )
+            elif next_run:
                 routine.next_run_at = next_run
             else:
                 # One-time routine completed
@@ -248,6 +271,42 @@ class DenverScheduler:
 
         except Exception as e:
             logger.exception("Failed processing due routine %s: %s", routine.routine_id, e)
+            now_err = datetime.now(timezone.utc)
+            routine.last_run_at = now_err
+            routine.last_status = "FAILED"
+            routine.failure_count += 1
+            routine.updated_at = now_err
+
+            # Apply backoff or cutoff on unexpected failure to prevent infinite retry loop
+            if routine.failure_count >= 5:
+                routine.enabled = False
+                routine.status = RoutineStatus.PAUSED
+                routine.next_run_at = None
+                logger.error(
+                    "Routine '%s' disabled after %d consecutive unexpected failures.",
+                    routine.routine_id,
+                    routine.failure_count,
+                )
+            else:
+                next_run = self.trigger_engine.compute_next_run(routine.trigger, after_dt=now_err)
+                if next_run:
+                    # Guarantee at least 60 seconds backoff so failing routines cannot spin-loop
+                    min_backoff = now_err + timedelta(seconds=60)
+                    routine.next_run_at = max(next_run, min_backoff)
+                else:
+                    # One-time routine that failed unexpectedly
+                    routine.enabled = False
+                    routine.status = RoutineStatus.PAUSED
+                    routine.next_run_at = None
+
+            try:
+                def _save_failure(conn) -> Routine:
+                    repo = RoutineRepository(conn)
+                    return repo.save(routine)
+
+                await self.registry.db.run_async(_save_failure)
+            except Exception as save_err:
+                logger.error("Failed saving routine failure state for %s: %s", routine.routine_id, save_err)
 
     async def _get_earliest_next_run(self) -> datetime | None:
         """Find the earliest next_run_at among all active routines."""

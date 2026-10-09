@@ -6,16 +6,23 @@ import asyncio
 import sys
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QObject, Qt, QTimer
     from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
     from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QApplication = object  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QObject, Qt, QTimer
+        from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+        from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QApplication = object
+
 
 from denver import __version__, assistant_name, product_name
 from denver.app.application import DenverApplication
@@ -65,10 +72,11 @@ class DenverCockpitApp:
             logger.warning("PySide6 is not available; graphical interface cannot be initialized.")
             return
 
-        if not QApplication.instance():
-            self.qapp = QApplication(sys.argv)
+        app_inst = QApplication.instance()
+        if isinstance(app_inst, QApplication):
+            self.qapp = app_inst
         else:
-            self.qapp = QApplication.instance()
+            self.qapp = QApplication(sys.argv)
 
         self.qapp.setApplicationName(product_name)
         self.qapp.setApplicationVersion(__version__)
@@ -84,6 +92,7 @@ class DenverCockpitApp:
             bridge=bridge,
             event_loop=self._async_loop,
         )
+        self.controller.bind_event_bus()
 
         # Create Main Window
         self.window = MainWindow(controller=self.controller)

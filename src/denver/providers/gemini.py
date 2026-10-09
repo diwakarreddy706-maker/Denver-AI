@@ -88,8 +88,9 @@ class GeminiProvider(AIProvider):
 
         start = time.perf_counter()
         try:
-            url = f"{self.base_url}/models?key={api_key}"
-            await asyncio.to_thread(_http_request, url, None, None, 3.0)
+            url = f"{self.base_url}/models"
+            headers = {"x-goog-api-key": api_key}
+            await asyncio.to_thread(_http_request, url, None, headers, 3.0)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
             return ProviderHealth(
                 provider_name=self.name,
@@ -116,8 +117,9 @@ class GeminiProvider(AIProvider):
         if not api_key:
             return []
         try:
-            url = f"{self.base_url}/models?key={api_key}"
-            data = await asyncio.to_thread(_http_request, url, None, None, 3.0)
+            url = f"{self.base_url}/models"
+            headers = {"x-goog-api-key": api_key}
+            data = await asyncio.to_thread(_http_request, url, None, headers, 3.0)
             models = []
             for item in data.get("models", []):
                 name = item.get("name", "").replace("models/", "")
@@ -183,10 +185,11 @@ class GeminiProvider(AIProvider):
             },
         }
 
-        url = f"{self.base_url}/models/{self.default_model}:generateContent?key={api_key}"
+        url = f"{self.base_url}/models/{self.default_model}:generateContent"
+        headers = {"x-goog-api-key": api_key}
 
         try:
-            res_data = await asyncio.to_thread(_http_request, url, payload, None, self.timeout_seconds)
+            res_data = await asyncio.to_thread(_http_request, url, payload, headers, self.timeout_seconds)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
             candidates = res_data.get("candidates", [])

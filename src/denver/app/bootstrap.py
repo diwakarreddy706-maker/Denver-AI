@@ -7,11 +7,13 @@ import asyncio
 import json
 import signal
 import sys
-from typing import Sequence
+import threading
+from typing import Any, Sequence
 
 from denver import __version__, assistant_name, product_name
 from denver.app.application import DenverApplication
 from denver.config.settings import DenverSettings, get_settings
+from denver.utils.single_instance import SingleInstanceGuard
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,6 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--scan-apps",
         action="store_true",
         help="Scan installed Windows applications, shortcuts, folders, and websites.",
+    )
+    parser.add_argument(
+        "--autostart",
+        choices=["enable", "disable", "status"],
+        nargs="?",
+        const="status",
+        help="Manage Windows user logon autostart launcher (enable, disable, status).",
     )
     return parser
 
@@ -234,6 +243,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"[{assistant_name}] Failed to scan apps: {exc}")
             return 1
 
+    if args.autostart:
+        from denver.automation.autostart import disable_autostart, enable_autostart, get_autostart_info
+        if args.autostart == "enable":
+            path = enable_autostart(headless=True)
+            print(f"[{assistant_name}] Autostart enabled: {path}")
+            return 0
+        elif args.autostart == "disable":
+            success = disable_autostart()
+            if success:
+                print(f"[{assistant_name}] Autostart disabled.")
+            else:
+                print(f"[{assistant_name}] Autostart was not enabled or already removed.")
+            return 0
+        elif args.autostart == "status":
+            info = get_autostart_info()
+            status_str = "ENABLED" if info["enabled"] else "DISABLED"
+            print(f"[{assistant_name}] Autostart Status: {status_str}")
+            print(f"  - Path: {info['path']}")
+            print(f"  - Project Root: {info['project_root']}")
+            return 0
+
+    # Single-instance guard ensures only one active Denver engine per user session
+    if not (args.health or args.command):
+        guard = SingleInstanceGuard()
+        if not guard.acquire():
+            print(f"[{assistant_name}] Another instance of Denver is already running. Exiting.")
+            return 0
+
     app = DenverApplication(settings=settings)
 
     if args.health:
@@ -253,6 +290,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(_exec_single())
         return 0
 
+    if args.headless:
+        return _run_headless_qt(app)
+
     if args.gui:
         try:
             from denver.ui.app import DenverCockpitApp
@@ -267,6 +307,86 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def _run_headless_qt(app: DenverApplication) -> int:
+    """Run Denver in headless background mode with a Qt event loop for HUD & tray."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        from denver.ui.tray import DenverTrayIcon
+
+        qapp = QApplication.instance()
+        if not isinstance(qapp, QApplication):
+            qapp = QApplication(sys.argv)
+        qapp.setQuitOnLastWindowClosed(False)
+
+        # Pre-initialize WakeOverlay & bridge on the main Qt GUI thread
+        from denver.ui.widgets.wake_overlay import get_wake_overlay, init_overlay_bridge
+        init_overlay_bridge(qapp)
+        get_wake_overlay()
+
+        backend_loop: asyncio.AbstractEventLoop | None = None
+        backend_thread: threading.Thread | None = None
+        ready_event = threading.Event()
+
+        def _worker() -> None:
+            nonlocal backend_loop
+            backend_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(backend_loop)
+            ready_event.set()
+            backend_loop.run_until_complete(app.start())
+            try:
+                backend_loop.run_forever()
+            finally:
+                backend_loop.close()
+
+        backend_thread = threading.Thread(target=_worker, name="DenverHeadlessWorker", daemon=True)
+        backend_thread.start()
+        ready_event.wait(timeout=5.0)
+
+        cockpit_ref: Any = None
+
+        def _open_cockpit() -> None:
+            nonlocal cockpit_ref
+            try:
+                from denver.ui.app import DenverCockpitApp
+                if cockpit_ref is None:
+                    cockpit_ref = DenverCockpitApp(denver_app=app)
+                cockpit_ref.show_window()
+            except Exception as exc:
+                print(f"[{assistant_name}] Error opening Cockpit: {exc}")
+
+        def _cleanup() -> None:
+            if backend_loop and backend_loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    app.stop(reason="user_quit"),
+                    backend_loop,
+                )
+                try:
+                    future.result(timeout=4.0)
+                except Exception:
+                    pass
+                backend_loop.call_soon_threadsafe(backend_loop.stop)
+            if backend_thread:
+                backend_thread.join(timeout=2.0)
+
+        tray = DenverTrayIcon(
+            denver_app=app,
+            on_open_cockpit=_open_cockpit,
+            on_quit=_cleanup,
+        )
+        tray.show()
+
+        qapp.aboutToQuit.connect(_cleanup)
+        return qapp.exec()
+    except Exception as exc:
+        print(f"[{assistant_name}] PySide6 headless loop unavailable ({exc}). Falling back to CLI loop.")
+        try:
+            asyncio.run(_run_app(app))
+        except KeyboardInterrupt:
+            pass
+        return 0
+
 
 
 if __name__ == "__main__":

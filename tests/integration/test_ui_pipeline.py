@@ -57,6 +57,7 @@ async def test_ui_pipeline_end_to_end(qapp, temp_db_path):
     assert len(controller.state.activity_history) == 1
 
     # Submit high-risk command: "lock my computer"
+    await asyncio.sleep(0.4)
     lock_item = await controller.submit_command_async("Denver, lock my computer")
     assert lock_item.action_name == "lock_workstation"
     assert controller.state.pending_confirmation is not None
@@ -65,6 +66,7 @@ async def test_ui_pipeline_end_to_end(qapp, temp_db_path):
 
     # Confirm action
     token = controller.state.pending_confirmation.token
+    await asyncio.sleep(0.4)
     confirm_item = await controller.submit_command_async(f"Denver, confirm {token}")
     assert confirm_item.action_name == "confirm_action"
     assert confirm_item.success is True

@@ -279,6 +279,15 @@ class DenverApplication:
             )
             raise
 
+        # Reconcile orphaned running tasks from previous crashes/restarts
+        if hasattr(self, "task_persistence") and self.task_persistence:
+            try:
+                reconciled = self.task_persistence.reconcile_orphaned_tasks()
+                if reconciled > 0:
+                    logger.info("Startup task reconciliation: recovered %d orphaned task(s).", reconciled)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Could not reconcile orphaned tasks on startup: %s", exc)
+
         # Start voice pipeline if audio enabled
         if self.settings.audio_enabled:
             try:

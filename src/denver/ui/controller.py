@@ -5,15 +5,19 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QObject, QTimer, Signal
     _PYSIDE_AVAILABLE = True
-except ImportError:
-    _PYSIDE_AVAILABLE = False
-    QObject = object  # type: ignore
-    Signal = lambda *args: None  # type: ignore
+else:
+    try:
+        from PySide6.QtCore import QObject, QTimer, Signal
+        _PYSIDE_AVAILABLE = True
+    except ImportError:
+        _PYSIDE_AVAILABLE = False
+        QObject = object
+        Signal = lambda *args: None
 
 from denver.commands.models import CommandResponse
 from denver.logging.logger import get_logger
@@ -69,6 +73,8 @@ class UIController:
         self.event_loop = event_loop
         self.state = CockpitState()
         self._subscribed = False
+        self._command_in_flight: bool = False
+        self._last_submit_time: float = 0.0
 
         # Setup telemetry polling timer (1500 ms)
         if _PYSIDE_AVAILABLE:
@@ -145,6 +151,16 @@ class UIController:
         if not text:
             return
 
+        now = time.time()
+        if self._command_in_flight and (now - self._last_submit_time < 8.0):
+            logger.warning("Command submission dropped (command currently in flight): '%s'", text)
+            return
+        if (now - self._last_submit_time < 0.15):
+            logger.warning("Duplicate command submission dropped (debounced): '%s'", text)
+            return
+
+        self._command_in_flight = True
+        self._last_submit_time = now
         logger.info("Submitting command from Cockpit UI: '%s'", text)
 
         # Transition state to PROCESSING
@@ -152,39 +168,50 @@ class UIController:
         if self.bridge and hasattr(self.bridge, "state_changed"):
             self.bridge.state_changed.emit(DenverState.PROCESSING, f"Processing '{text}'")
 
-        if self.app and hasattr(self.app, "process_command"):
-            try:
-                running_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                running_loop = None
+        try:
+            if self.app and hasattr(self.app, "process_command"):
+                try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
 
-            if running_loop is not None and running_loop == self.event_loop:
-                task = running_loop.create_task(self.app.process_command(text))
+                if running_loop is not None and running_loop == self.event_loop:
+                    task = running_loop.create_task(self.app.process_command(text))
 
-                def _task_done(t: Any) -> None:
-                    try:
-                        resp: CommandResponse = t.result()
-                        self._handle_command_response(text, resp)
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.error("Command execution error in task: %s", exc)
-                        self._handle_command_error(text, str(exc))
+                    def _task_done(t: Any) -> None:
+                        try:
+                            resp: CommandResponse = t.result()
+                            self._handle_command_response(text, resp)
+                        except Exception as exc:  # pylint: disable=broad-except
+                            logger.error("Command execution error in task: %s", exc)
+                            self._handle_command_error(text, str(exc))
 
-                task.add_done_callback(_task_done)
-            elif self.event_loop and self.event_loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    self.app.process_command(text),
-                    self.event_loop,
-                )
+                    task.add_done_callback(_task_done)
+                elif self.event_loop and self.event_loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.app.process_command(text),
+                        self.event_loop,
+                    )
 
-                def _done_callback(fut: Any) -> None:
-                    try:
-                        resp: CommandResponse = fut.result()
-                        self._handle_command_response(text, resp)
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.error("Command execution error in background task: %s", exc)
-                        self._handle_command_error(text, str(exc))
+                    def _done_callback(fut: Any) -> None:
+                        try:
+                            resp: CommandResponse = fut.result()
+                            self._handle_command_response(text, resp)
+                        except Exception as exc:  # pylint: disable=broad-except
+                            logger.error("Command execution error in background task: %s", exc)
+                            self._handle_command_error(text, str(exc))
 
-                future.add_done_callback(_done_callback)
+                    future.add_done_callback(_done_callback)
+                else:
+                    from denver.commands.models import CommandRiskLevel
+                    dummy_resp = CommandResponse(
+                        success=True,
+                        message=f"Received: {text}",
+                        action_name="custom",
+                        risk_level=CommandRiskLevel.SAFE,
+                        latency_ms=5.0,
+                    )
+                    self._handle_command_response(text, dummy_resp)
             else:
                 from denver.commands.models import CommandRiskLevel
                 dummy_resp = CommandResponse(
@@ -195,16 +222,10 @@ class UIController:
                     latency_ms=5.0,
                 )
                 self._handle_command_response(text, dummy_resp)
-        else:
-            from denver.commands.models import CommandRiskLevel
-            dummy_resp = CommandResponse(
-                success=True,
-                message=f"Received: {text}",
-                action_name="custom",
-                risk_level=CommandRiskLevel.SAFE,
-                latency_ms=5.0,
-            )
-            self._handle_command_response(text, dummy_resp)
+        except Exception as exc:
+            logger.error("Failed to schedule command execution: %s", exc)
+            self._command_in_flight = False
+            self._handle_command_error(text, str(exc))
 
     async def submit_command_async(self, command_text: str) -> ActivityItem:
         """Submit command and await completion directly (ideal for async tests & pipelines)."""
@@ -212,28 +233,39 @@ class UIController:
         if not text:
             return ActivityItem()
 
-        self.state.current_state = DenverState.PROCESSING
-        if self.bridge and hasattr(self.bridge, "state_changed"):
-            self.bridge.state_changed.emit(DenverState.PROCESSING, f"Processing '{text}'")
+        now = time.time()
+        if self._command_in_flight or (now - self._last_submit_time < 0.35):
+            logger.warning("Duplicate async command submission dropped: '%s'", text)
+            return self.state.activity_history[-1] if self.state.activity_history else ActivityItem()
 
-        if self.app and hasattr(self.app, "process_command"):
-            try:
-                resp = await self.app.process_command(text)
-                self._handle_command_response(text, resp)
-            except Exception as exc:  # pylint: disable=broad-except
-                self._handle_command_error(text, str(exc))
-        else:
-            from denver.commands.models import CommandRiskLevel
-            dummy_resp = CommandResponse(
-                success=True,
-                message=f"Received: {text}",
-                action_name="custom",
-                risk_level=CommandRiskLevel.SAFE,
-                latency_ms=5.0,
-            )
-            self._handle_command_response(text, dummy_resp)
+        self._command_in_flight = True
+        self._last_submit_time = now
 
-        return self.state.activity_history[-1] if self.state.activity_history else ActivityItem()
+        try:
+            self.state.current_state = DenverState.PROCESSING
+            if self.bridge and hasattr(self.bridge, "state_changed"):
+                self.bridge.state_changed.emit(DenverState.PROCESSING, f"Processing '{text}'")
+
+            if self.app and hasattr(self.app, "process_command"):
+                try:
+                    resp = await self.app.process_command(text)
+                    self._handle_command_response(text, resp)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._handle_command_error(text, str(exc))
+            else:
+                from denver.commands.models import CommandRiskLevel
+                dummy_resp = CommandResponse(
+                    success=True,
+                    message=f"Received: {text}",
+                    action_name="custom",
+                    risk_level=CommandRiskLevel.SAFE,
+                    latency_ms=5.0,
+                )
+                self._handle_command_response(text, dummy_resp)
+
+            return self.state.activity_history[-1] if self.state.activity_history else ActivityItem()
+        finally:
+            self._command_in_flight = False
 
     def _handle_command_response(self, query: str, response: CommandResponse) -> None:
         risk_str = response.risk_level.value if hasattr(response.risk_level, "value") else str(response.risk_level)
@@ -263,7 +295,8 @@ class UIController:
         if self.bridge and hasattr(self.bridge, "activity_added"):
             self.bridge.activity_added.emit(item)
 
-        # Restore STANDBY state
+        # Restore STANDBY state & clear in-flight guard
+        self._command_in_flight = False
         self.state.current_state = DenverState.STANDBY
         if self.bridge and hasattr(self.bridge, "state_changed"):
             self.bridge.state_changed.emit(DenverState.STANDBY, "Ready")
@@ -282,6 +315,7 @@ class UIController:
         if self.bridge and hasattr(self.bridge, "activity_added"):
             self.bridge.activity_added.emit(item)
 
+        self._command_in_flight = False
         self.state.current_state = DenverState.STANDBY
         if self.bridge and hasattr(self.bridge, "state_changed"):
             self.bridge.state_changed.emit(DenverState.STANDBY, "Ready")

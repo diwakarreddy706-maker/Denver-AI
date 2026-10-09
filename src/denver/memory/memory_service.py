@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 from denver.logging.logger import get_logger
 from denver.memory.database import DenverDatabase
+from denver.memory.corrections import UserCorrectionStore
 from denver.memory.deduplication import MemoryDeduplicator
 from denver.memory.embeddings import (
     DeterministicLexicalEmbedder,
@@ -19,10 +20,12 @@ from denver.memory.embeddings import (
     OllamaEmbeddingProvider,
 )
 from denver.memory.expiration import ExpirationManager, compute_expiration_for_category
+from denver.memory.habits import LearnedHabitsEngine
 from denver.memory.models import (
     AuditRecord,
     CachedLocation,
     CommandHabit,
+    LearnedHabit,
     MemoryCategory,
     MemoryItem,
     MemorySearchResult,
@@ -30,6 +33,7 @@ from denver.memory.models import (
     PrivacyLevel,
     SavedLocation,
     Task,
+    UserCorrection,
     UserPreference,
 )
 from denver.memory.ranking import MemoryRanker
@@ -37,11 +41,13 @@ from denver.memory.repositories import (
     AuditLogRepository,
     EmbeddingRepository,
     HabitsRepository,
+    LearnedHabitsRepository,
     LocationCacheRepository,
     MemoryItemRepository,
     NotesRepository,
     SavedLocationRepository,
     TasksRepository,
+    UserCorrectionsRepository,
     UserPreferencesRepository,
 )
 from denver.memory.search import MemorySearchCoordinator
@@ -101,6 +107,11 @@ class MemoryService:
         self.ranker = MemoryRanker()
         self.search_coordinator = MemorySearchCoordinator(self.embedding_manager, self.ranker)
         self.deduplicator = MemoryDeduplicator()
+
+        # Initialize Pillar 3 Evolving Memory & Personalization Engines
+        self.corrections = UserCorrectionStore(self.db)
+        self.habits_engine = LearnedHabitsEngine(self.db)
+
 
     @property
     def privacy_mode(self) -> bool:
@@ -944,5 +955,72 @@ class MemoryService:
                 await self.delete_note(n.id)
                 count += 1
         return count
+
+    # -------------------------------------------------------------------------
+    # Pillar 3: User Corrections & Learned Habits API
+    # -------------------------------------------------------------------------
+    async def add_user_correction(
+        self,
+        pattern: str,
+        correction: str,
+        target_domain: str = "general",
+        priority: int = 10,
+    ) -> UserCorrection:
+        """Store an explicit user correction / override."""
+        return await self.corrections.add_correction(
+            pattern=pattern,
+            correction=correction,
+            target_domain=target_domain,
+            priority=priority,
+        )
+
+    async def get_active_corrections(self, target_domain: str | None = None) -> list[UserCorrection]:
+        """Get active user corrections."""
+        return await self.corrections.get_active_corrections(target_domain=target_domain)
+
+    async def list_user_corrections(self, include_inactive: bool = False, limit: int = 50) -> list[UserCorrection]:
+        """List user corrections."""
+        return await self.corrections.list_corrections(include_inactive=include_inactive, limit=limit)
+
+    async def delete_user_correction(self, correction_id: int) -> bool:
+        """Delete user correction by ID."""
+        return await self.corrections.delete_correction(correction_id)
+
+    async def clear_all_corrections(self) -> int:
+        """Clear all user corrections."""
+        return await self.corrections.clear_all_corrections()
+
+    async def record_learned_habit(
+        self,
+        category: str,
+        habit_key: str,
+        habit_value: str,
+        confidence_boost: float = 0.1,
+    ) -> LearnedHabit:
+        """Record an observed usage habit."""
+        return await self.habits_engine.record_observation(
+            category=category,
+            habit_key=habit_key,
+            habit_value=habit_value,
+            confidence_boost=confidence_boost,
+        )
+
+    async def list_learned_habits(
+        self,
+        category: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 50,
+    ) -> list[LearnedHabit]:
+        """List learned habits."""
+        return await self.habits_engine.list_habits(
+            category=category,
+            min_confidence=min_confidence,
+            limit=limit,
+        )
+
+    async def get_habit_suggestions(self, min_confidence: float = 0.6) -> list[str]:
+        """Get proactive habit suggestions."""
+        return await self.habits_engine.get_habit_suggestions(min_confidence=min_confidence)
+
 
 

@@ -56,6 +56,16 @@ from denver.audio.meeting import (
 from denver.audio.push_to_talk import PushToTalkListener
 from denver.audio.tts_cache import CachedTTSProvider, TTSPhraseCache
 from denver.audio.tts_queue import DenverTTSQueue, TTSPriority
+from denver.audio.voices import (
+    VOICE_CATALOG,
+    VoiceProfile,
+    find_voice,
+    list_available_voices,
+)
+from denver.audio.voice_manager import (
+    VoiceProfileManager,
+    get_voice_manager,
+)
 
 __all__ = [
     "AudioCapture",
@@ -93,10 +103,17 @@ __all__ = [
     "TextToSpeechProvider",
     "VADEngine",
     "VoiceActivity",
+    "VOICE_CATALOG",
     "VoicePipeline",
+    "VoiceProfile",
+    "VoiceProfileManager",
     "WakeWordDetector",
     "WakeWordResult",
     "WasapiLoopbackCapture",
     "WhisperSTTProvider",
     "WindowsTTSProvider",
+    "find_voice",
+    "get_voice_manager",
+    "list_available_voices",
 ]
+

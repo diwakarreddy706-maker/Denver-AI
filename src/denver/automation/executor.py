@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import time
 from typing import Any
 
@@ -57,8 +58,10 @@ class AutomationExecutor:
         confirmation: ConfirmationManager | None = None,
         spotify: Any | None = None,
         terminal_fix: Any | None = None,
+        email_monitor: Any | None = None,
         event_bus: DenverEventBus | None = None,
         allow_high_risk_actions: bool = False,
+        settings: Any | None = None,
     ) -> None:
         from denver.automation.clipboard import ClipboardController
         from denver.automation.keyboard import KeyboardController
@@ -76,9 +79,11 @@ class AutomationExecutor:
         self.keyboard = KeyboardController()
         self.spotify = spotify or SpotifyController()
         self.terminal_fix = terminal_fix or TerminalFixController()
+        self.email_monitor = email_monitor
         self.confirmation = confirmation or ConfirmationManager()
         self.event_bus = event_bus or get_event_bus()
         self.allow_high_risk_actions = allow_high_risk_actions
+        self.settings = settings
 
     async def execute(self, request: AutomationRequest) -> AutomationResult:
         """Process and execute an automation request through safety and confirmation checks."""
@@ -354,6 +359,588 @@ class AutomationExecutor:
                 cwd = request.params.get("cwd")
                 res = self.terminal_fix.execute_fix(command=cmd, timeout_seconds=timeout, cwd=cwd)
 
+            elif action_name in {"check_emails", "summarize_emails"}:
+                limit = int(request.params.get("limit", 5))
+                monitor = self._get_email_monitor()
+                summaries = await monitor.check_now(limit=limit)
+                if not summaries:
+                    # If no new emails in monitor, fetch recent/unread directly from client
+                    messages = await monitor.client.fetch_unread(limit=limit)
+                    summaries = await monitor.analyzer.analyze_batch(messages)
+
+                formatted = "\n\n".join(s.format_display() for s in summaries) if summaries else "Your inbox has no new unread emails."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="inbox",
+                    message=formatted,
+                    data={"count": len(summaries), "summaries": [s.to_dict() for s in summaries]},
+                )
+
+            elif action_name == "read_latest_email":
+                monitor = self._get_email_monitor()
+                messages = await monitor.client.fetch_recent(limit=1)
+                if not messages:
+                    res = AutomationResult(
+                        success=True,
+                        action=action_name,
+                        target="inbox",
+                        message="No emails found in your inbox.",
+                        data={"count": 0},
+                    )
+                else:
+                    summary = await monitor.analyzer.analyze_message(messages[0])
+                    res = AutomationResult(
+                        success=True,
+                        action=action_name,
+                        target=messages[0].subject,
+                        message=summary.format_display(),
+                        data={"summary": summary.to_dict(), "message": messages[0].to_dict()},
+                    )
+
+            elif action_name == "start_email_monitor":
+                monitor = self._get_email_monitor()
+                started = await monitor.start()
+                res = AutomationResult(
+                    success=started,
+                    action=action_name,
+                    target="email_monitor",
+                    message="Continuous email monitoring started." if started else "Email monitoring is already active.",
+                    data=monitor.get_status(),
+                )
+
+            elif action_name == "stop_email_monitor":
+                monitor = self._get_email_monitor()
+                stopped = await monitor.stop()
+                res = AutomationResult(
+                    success=stopped,
+                    action=action_name,
+                    target="email_monitor",
+                    message="Continuous email monitoring stopped." if stopped else "Email monitoring is not active.",
+                    data=monitor.get_status(),
+                )
+
+            elif action_name == "get_email_monitor_status":
+                monitor = self._get_email_monitor()
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="email_monitor",
+                    message="Email monitor status retrieved.",
+                    data=monitor.get_status(),
+                )
+
+            elif action_name == "draft_email":
+                monitor = self._get_email_monitor()
+                to = str(request.params.get("to", ""))
+                subject = str(request.params.get("subject", "No Subject"))
+                body = str(request.params.get("body", ""))
+                cc = str(request.params.get("cc", ""))
+                bcc = str(request.params.get("bcc", ""))
+                draft = monitor.client.create_draft(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=to,
+                    message=f"Email draft '{draft.draft_id}' created for {to}: '{subject}'.",
+                    data=draft.to_dict(),
+                )
+
+            elif action_name == "send_email":
+                monitor = self._get_email_monitor()
+                to = str(request.params.get("to", ""))
+                subject = str(request.params.get("subject", "No Subject"))
+                body = str(request.params.get("body", ""))
+                cc = str(request.params.get("cc", ""))
+                bcc = str(request.params.get("bcc", ""))
+                draft_id = request.params.get("draft_id")
+                send_res = await monitor.client.send_email(
+                    to=to,
+                    subject=subject,
+                    body=body,
+                    cc=cc,
+                    bcc=bcc,
+                    draft_id=draft_id,
+                )
+                res = AutomationResult(
+                    success=send_res.success,
+                    action=action_name,
+                    target=to,
+                    message=send_res.message,
+                    data=send_res.to_dict(),
+                    error=send_res.error,
+                )
+
+            elif action_name == "reply_to_email":
+                monitor = self._get_email_monitor()
+                body = str(request.params.get("body", ""))
+                uid = request.params.get("uid")
+                recipient = request.params.get("recipient") or request.params.get("to")
+                orig_subject = request.params.get("subject")
+                reply_res = await monitor.client.reply_to_email(
+                    body=body,
+                    uid=uid,
+                    recipient=recipient,
+                    original_subject=orig_subject,
+                )
+                res = AutomationResult(
+                    success=reply_res.success,
+                    action=action_name,
+                    target=reply_res.recipient,
+                    message=reply_res.message,
+                    data=reply_res.to_dict(),
+                    error=reply_res.error,
+                )
+
+            elif action_name in {"get_today_schedule", "show_calendar"}:
+                cal = self._get_calendar_service()
+                target_date = request.params.get("date")
+                schedule = cal.get_events_for_date(target_date)
+                res = AutomationResult(
+                    success=True,
+                    action="get_today_schedule",
+                    target="calendar",
+                    message=schedule.format_briefing(),
+                    data=schedule.to_dict(),
+                )
+
+            elif action_name == "create_calendar_event":
+                cal = self._get_calendar_service()
+                title = str(request.params.get("title", "Meeting"))
+                ev_start_time = request.params.get("start_time") or request.params.get("time")
+                if not ev_start_time:
+                    from denver.calendar.service import _resolve_datetime_expr
+                    ev_start_time = _resolve_datetime_expr(str(request.params.get("date_expr", "today at 10 AM")))
+                ev_end_time = request.params.get("end_time")
+                location = str(request.params.get("location", ""))
+                description = str(request.params.get("description", ""))
+                event = cal.create_event(
+                    title=title,
+                    start_time=ev_start_time,
+                    end_time=ev_end_time,
+                    location=location,
+                    description=description,
+                )
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=title,
+                    message=f"Scheduled '{event.title}' on {event.starts_at_dt().strftime('%A, %b %d at %I:%M %p')}.",
+                    data=event.to_dict(),
+                )
+
+            elif action_name == "get_next_meeting":
+                cal = self._get_calendar_service()
+                next_ev = cal.get_next_meeting()
+                if next_ev:
+                    msg = f"Your next meeting is '{next_ev.title}' at {next_ev.format_time_span()} on {next_ev.starts_at_dt().strftime('%A, %b %d')}."
+                    res = AutomationResult(
+                        success=True,
+                        action=action_name,
+                        target=next_ev.title,
+                        message=msg,
+                        data=next_ev.to_dict(),
+                    )
+                else:
+                    res = AutomationResult(
+                        success=True,
+                        action=action_name,
+                        target="calendar",
+                        message="You have no upcoming meetings scheduled.",
+                        data={"has_upcoming": False},
+                    )
+
+            elif action_name == "delete_calendar_event":
+                cal = self._get_calendar_service()
+                event_id = request.params.get("event_id") or request.params.get("id")
+                title = request.params.get("title")
+                deleted = cal.delete_event(event_id=int(event_id) if event_id else None, title=title)
+                res = AutomationResult(
+                    success=deleted,
+                    action=action_name,
+                    target=str(event_id or title),
+                    message=f"Calendar event '{event_id or title}' removed." if deleted else f"Calendar event '{event_id or title}' not found.",
+                    data={"deleted": deleted},
+                )
+
+            elif action_name == "search_calendar_events":
+                cal = self._get_calendar_service()
+                query = str(request.params.get("query", ""))
+                events = cal.search_events(query)
+                formatted = "\n".join(e.format_display() for e in events) if events else f"No events found matching '{query}'."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=query,
+                    message=formatted,
+                    data={"count": len(events), "events": [e.to_dict() for e in events]},
+                )
+
+            elif action_name == "import_calendar_ics":
+                cal = self._get_calendar_service()
+                content = str(request.params.get("ics_data") or request.params.get("path", ""))
+                count = cal.import_ics(content)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="ics_import",
+                    message=f"Successfully imported {count} event(s) into your calendar.",
+                    data={"imported_count": count},
+                )
+
+            # Step 3: Local Document & PDF Semantic RAG
+            elif action_name == "index_document":
+                rag = self._get_rag_service()
+                path = str(request.params.get("path") or request.params.get("file_path") or request.target)
+                meta = await rag.index_file(path)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=path,
+                    message=f"Indexed document '{meta.file_name}' ({meta.file_type.upper()}) into {meta.chunk_count} chunk(s).",
+                    data=meta.to_dict(),
+                )
+
+            elif action_name == "search_documents":
+                rag = self._get_rag_service()
+                query = str(request.params.get("query") or request.target)
+                top_k = int(request.params.get("top_k", 5))
+                file_filter = request.params.get("file_filter")
+                results = await rag.search(query=query, top_k=top_k, file_filter=file_filter)
+                if results:
+                    formatted = "\n\n".join(
+                        f"[{i}] {r.file_name}" + (f" (Page {r.page})" if r.page else "") + f" [Match: {int(r.score * 100)}%]:\n{r.snippet}"
+                        for i, r in enumerate(results, start=1)
+                    )
+                    msg = f"Found {len(results)} matching document excerpt(s):\n\n{formatted}"
+                else:
+                    msg = f"No document matches found for '{query}'."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=query,
+                    message=msg,
+                    data={"count": len(results), "results": [r.to_dict() for r in results]},
+                )
+
+            elif action_name == "ask_document":
+                rag = self._get_rag_service()
+                query = str(request.params.get("query") or request.target)
+                file_filter = request.params.get("file_filter")
+                ans = await rag.ask(query=query, file_filter=file_filter)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=query,
+                    message=ans.format_display(),
+                    data=ans.to_dict(),
+                )
+
+            elif action_name == "list_documents":
+                rag = self._get_rag_service()
+                docs = rag.list_documents()
+                if docs:
+                    lines = [f"- {d['file_name']}: {d['chunk_count']} chunk(s) (indexed {d['indexed_at']})" for d in docs]
+                    msg = f"Indexed Documents ({len(docs)}):\n" + "\n".join(lines)
+                else:
+                    msg = "No documents have been indexed yet. Use 'index document <path>' to add files."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="documents",
+                    message=msg,
+                    data={"count": len(docs), "documents": docs},
+                )
+
+            elif action_name == "delete_document":
+                rag = self._get_rag_service()
+                target = str(request.params.get("path") or request.params.get("file_name") or request.target)
+                deleted = rag.delete_document(target)
+                res = AutomationResult(
+                    success=deleted,
+                    action=action_name,
+                    target=target,
+                    message=f"Removed indexed document '{target}'." if deleted else f"Document '{target}' was not found in index.",
+                    data={"deleted": deleted},
+                )
+
+            # Step 4: Spoken Voice Profile Selector (Edge-TTS)
+            elif action_name == "switch_voice":
+                vm = self._get_voice_manager()
+                target_voice = str(request.params.get("voice") or request.params.get("name") or request.target)
+                ok, profile, msg = vm.set_voice(target_voice)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=target_voice,
+                    message=msg,
+                    data=profile.to_dict() if profile else {},
+                )
+
+            elif action_name == "list_voices":
+                from denver.audio.voices import list_available_voices
+                vm = self._get_voice_manager()
+                voices = list_available_voices()
+                active_id = vm.active_voice.voice_id
+                lines = [
+                    f"- {'[ACTIVE] ' if v.voice_id == active_id else ''}{v.name} ({v.locale} {v.gender}) — {v.tone}"
+                    for v in voices
+                ]
+                msg = f"Available Spoken Voices ({len(voices)}):\n" + "\n".join(lines)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="voices",
+                    message=msg,
+                    data={"voices": [v.to_dict() for v in voices], "active_voice": vm.active_voice.to_dict()},
+                )
+
+            elif action_name == "set_voice_speed":
+                vm = self._get_voice_manager()
+                speed = str(request.params.get("speed") or request.params.get("rate") or request.target)
+                ok, rate, msg = vm.set_speed(speed)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=rate,
+                    message=msg,
+                    data={"rate": rate},
+                )
+
+            elif action_name == "set_voice_pitch":
+                vm = self._get_voice_manager()
+                pitch = str(request.params.get("pitch") or request.target)
+                ok, pitch_val, msg = vm.set_pitch(pitch)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=pitch_val,
+                    message=msg,
+                    data={"pitch": pitch_val},
+                )
+
+            elif action_name == "preview_voice":
+                vm = self._get_voice_manager()
+                voice_arg = request.params.get("voice") or request.target
+                phrase_arg = request.params.get("phrase")
+                ok, msg = await vm.preview_voice(voice_query=str(voice_arg) if voice_arg and voice_arg != "preview_voice" else None, custom_phrase=phrase_arg)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(voice_arg or "active"),
+                    message=msg,
+                    data={"voice": vm.active_voice.name},
+                )
+
+            elif action_name == "get_voice_settings":
+                vm = self._get_voice_manager()
+                status = vm.get_status()
+                v = vm.active_voice
+                msg = f"Current Voice: {v.name} ({v.locale} {v.gender}, {v.tone})\nSpeed: {vm.active_rate} | Pitch: {vm.active_pitch}"
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="voice_settings",
+                    message=msg,
+                    data=status,
+                )
+
+            # Step 5: File System Assistant & Downloads Organizer
+            elif action_name == "organize_downloads":
+                org = self._get_file_organizer()
+                target_dir = request.params.get("path") or request.params.get("target_dir")
+                dry_run = bool(request.params.get("dry_run", False))
+                summary = org.organize_directory(target_dir=target_dir, dry_run=dry_run)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=summary.target_directory,
+                    message=summary.format_display(),
+                    data=summary.to_dict(),
+                )
+
+            elif action_name == "find_large_files":
+                org = self._get_file_organizer()
+                target_dir = request.params.get("path") or request.params.get("target_dir")
+                min_size_mb = float(request.params.get("min_size_mb", 50.0))
+                limit = int(request.params.get("limit", 10))
+                large_files = org.find_large_files(target_dir=target_dir, min_size_mb=min_size_mb, limit=limit)
+                if large_files:
+                    lines = [f"- {f.name} ({f.format_size()}) [{f.category}]" for f in large_files]
+                    msg = f"Found {len(large_files)} large file(s) (>={min_size_mb} MB):\n" + "\n".join(lines)
+                else:
+                    msg = f"No files larger than {min_size_mb} MB found in {org.get_target_directory(target_dir)}."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=str(org.get_target_directory(target_dir)),
+                    message=msg,
+                    data={"count": len(large_files), "files": [f.to_dict() for f in large_files]},
+                )
+
+            elif action_name == "find_duplicate_files":
+                org = self._get_file_organizer()
+                target_dir = request.params.get("path") or request.params.get("target_dir")
+                dups = org.find_duplicates(target_dir=target_dir)
+                if dups:
+                    blocks = []
+                    for i, grp in enumerate(dups, start=1):
+                        file_names = ", ".join(Path(p).name for p in grp.files)
+                        blocks.append(f"[{i}] {grp.count} copies ({round(grp.size_bytes / 1024, 1)} KB): {file_names}")
+                    msg = f"Found {len(dups)} duplicate file group(s):\n\n" + "\n".join(blocks)
+                else:
+                    msg = f"No duplicate files found in {org.get_target_directory(target_dir)}."
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=str(org.get_target_directory(target_dir)),
+                    message=msg,
+                    data={"count": len(dups), "groups": [g.to_dict() for g in dups]},
+                )
+
+            elif action_name == "clean_temp_files":
+                org = self._get_file_organizer()
+                target_dir = request.params.get("path") or request.params.get("target_dir")
+                count, bytes_freed, msg = org.clean_temp_files(target_dir=target_dir)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target=str(org.get_target_directory(target_dir)),
+                    message=msg,
+                    data={"cleaned_count": count, "bytes_freed": bytes_freed},
+                )
+
+            elif action_name == "undo_file_organization":
+                org = self._get_file_organizer()
+                ok, reverted_count, msg = org.undo_last_organization()
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target="undo",
+                    message=msg,
+                    data={"reverted_count": reverted_count},
+                )
+
+            # Step 6: Local Git & Dev Workflow Actions
+            elif action_name == "git_status":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                ok, status_res, msg = git_svc.get_status(repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(git_svc.resolve_repo_path(repo)),
+                    message=msg,
+                    data=status_res.to_dict() if status_res else {},
+                )
+
+            elif action_name == "git_branches":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                ok, branches, msg = git_svc.get_branches(repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(git_svc.resolve_repo_path(repo)),
+                    message=msg,
+                    data={"branches": [b.to_dict() for b in branches], "count": len(branches)},
+                )
+
+            elif action_name == "git_log":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                limit = int(request.params.get("limit", 5))
+                ok, commits, msg = git_svc.get_log(limit=limit, repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(git_svc.resolve_repo_path(repo)),
+                    message=msg,
+                    data={"commits": [c.to_dict() for c in commits], "count": len(commits)},
+                )
+
+            elif action_name == "git_diff":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                staged = bool(request.params.get("staged", False))
+                ok, diff_res, msg = git_svc.get_diff_summary(staged=staged, repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(git_svc.resolve_repo_path(repo)),
+                    message=msg,
+                    data=diff_res.to_dict() if diff_res else {},
+                )
+
+            elif action_name == "git_create_branch":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                branch_name = str(request.params.get("branch") or request.params.get("name") or request.params.get("branch_name", "")).strip()
+                checkout = bool(request.params.get("checkout", True))
+                ok, msg = git_svc.create_branch(branch_name=branch_name, checkout=checkout, repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=branch_name,
+                    message=msg,
+                    data={"branch": branch_name, "checkout": checkout},
+                )
+
+            elif action_name == "git_switch_branch":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                branch_name = str(request.params.get("branch") or request.params.get("name") or request.params.get("branch_name", "")).strip()
+                ok, msg = git_svc.switch_branch(branch_name=branch_name, repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=branch_name,
+                    message=msg,
+                    data={"branch": branch_name},
+                )
+
+            elif action_name == "git_commit":
+                git_svc = self._get_git_service()
+                repo = request.params.get("repo_path") or request.params.get("path")
+                commit_msg = str(request.params.get("message") or "").strip()
+                stage_all = bool(request.params.get("stage_all", False) or request.params.get("all", False))
+                ok, msg = git_svc.commit(message=commit_msg, stage_all=stage_all, repo_path=repo)
+                res = AutomationResult(
+                    success=ok,
+                    action=action_name,
+                    target=str(git_svc.resolve_repo_path(repo)),
+                    message=msg,
+                    data={"message": commit_msg, "stage_all": stage_all},
+                )
+
+            # Step 7: Proactive Morning & Evening Audio Briefings
+            elif action_name == "morning_briefing":
+                briefing_svc = self._get_briefing_service()
+                speak_audio = bool(request.params.get("audio", True) and not request.params.get("no_audio", False))
+                repo = request.params.get("repo_path") or request.params.get("path")
+                briefing = await briefing_svc.generate_morning_briefing(speak_audio=speak_audio, repo_path=repo)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="morning_briefing",
+                    message=briefing.format_display(),
+                    data=briefing.to_dict(),
+                )
+
+            elif action_name == "evening_briefing":
+                briefing_svc = self._get_briefing_service()
+                speak_audio = bool(request.params.get("audio", True) and not request.params.get("no_audio", False))
+                repo = request.params.get("repo_path") or request.params.get("path")
+                briefing = await briefing_svc.generate_evening_briefing(speak_audio=speak_audio, repo_path=repo)
+                res = AutomationResult(
+                    success=True,
+                    action=action_name,
+                    target="evening_briefing",
+                    message=briefing.format_display(),
+                    data=briefing.to_dict(),
+                )
+
+
             else:
                 res = AutomationResult(
                     success=False,
@@ -393,6 +980,59 @@ class AutomationExecutor:
 
         return res
 
+    def _get_email_monitor(self) -> Any:
+        """Get or lazily instantiate email monitoring service."""
+        if self.email_monitor is None:
+            from denver.automation.email import get_email_monitor
+            self.email_monitor = get_email_monitor()
+        settings = getattr(self, "settings", None)
+        if settings and getattr(settings, "email_mock_mode", False):
+            self.email_monitor.config.is_mock = True
+            self.email_monitor.client.config.is_mock = True
+        return self.email_monitor
+
+    def _get_calendar_service(self) -> Any:
+        """Get or lazily instantiate calendar scheduling service."""
+        if not hasattr(self, "_calendar_service") or self._calendar_service is None:
+            from denver.calendar import get_calendar_service
+            self._calendar_service = get_calendar_service()
+        return self._calendar_service
+
+    def _get_rag_service(self) -> Any:
+        """Get or lazily instantiate Document RAG service."""
+        if not hasattr(self, "_rag_service") or self._rag_service is None:
+            from denver.rag import get_rag_service
+            self._rag_service = get_rag_service()
+        return self._rag_service
+
+    def _get_voice_manager(self) -> Any:
+        """Get or lazily instantiate VoiceProfileManager."""
+        if not hasattr(self, "_voice_manager") or self._voice_manager is None:
+            from denver.audio import get_voice_manager
+            self._voice_manager = get_voice_manager()
+        return self._voice_manager
+
+    def _get_file_organizer(self) -> Any:
+        """Get or lazily instantiate FileOrganizerService."""
+        if not hasattr(self, "_file_organizer") or self._file_organizer is None:
+            from denver.automation.files import get_file_organizer
+            self._file_organizer = get_file_organizer()
+        return self._file_organizer
+
+    def _get_git_service(self) -> Any:
+        """Get or lazily instantiate GitDevService."""
+        if not hasattr(self, "_git_service") or self._git_service is None:
+            from denver.automation.git import get_git_service
+            self._git_service = get_git_service()
+        return self._git_service
+
+    def _get_briefing_service(self) -> Any:
+        """Get or lazily instantiate BriefingService."""
+        if not hasattr(self, "_briefing_service") or self._briefing_service is None:
+            from denver.briefing import get_briefing_service
+            self._briefing_service = get_briefing_service()
+        return self._briefing_service
+
     def get_health_status(self) -> dict[str, Any]:
         """Produce comprehensive diagnostics for desktop automation modules."""
         return {
@@ -404,6 +1044,9 @@ class AutomationExecutor:
             "browser": "READY",
             "screenshot": "READY",
             "system": "READY",
+            "email": "READY",
+            "calendar": "READY",
             "allowlisted_apps_count": len(self.registry.list_applications()),
             "known_sites_count": len(self.registry.list_known_sites()),
         }
+

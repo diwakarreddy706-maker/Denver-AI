@@ -37,9 +37,9 @@ c:\Users\diwak\Desktop\AI/
 │   ├── PLUGIN_ARCHITECTURE.md
 │   ├── PRODUCT_IDENTITY.md
 │   ├── REFERENCE_ANALYSIS.md
-│   ├── SECURITY_ARCHITECTURE.md
 │   ├── UI_ARCHITECTURE.md
 │   └── VOICE_PIPELINE.md
+├── SECURITY.md                        # Unified Security Policy, Architecture & Threat Model
 ├── src/
 │   └── denver/
 │       ├── __init__.py                # Package root & product identity exports

@@ -60,6 +60,9 @@ class DenverSettings:
     log_level: str = "INFO"
     log_file_path: Path = field(default_factory=lambda: Path("logs/denver.log"))
 
+    # Security Architecture & Trust Profile
+    security_profile: str = "normal"  # safe, normal, high_security, developer
+
     # Storage & Persistence
     database_path: Path = field(default_factory=lambda: Path("denver_memory.sqlite3"))
     privacy_mode: bool = False
@@ -98,7 +101,7 @@ class DenverSettings:
     groq_enabled: bool = True
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_api_key: str = ""
-    groq_model: str = "llama-3.1-8b-instant"
+    groq_model: str = "llama-3.3-70b-versatile"
 
     gemini_enabled: bool = True
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
@@ -151,6 +154,7 @@ class DenverSettings:
     stt_model: str = "base"
     stt_language: str = "en"
     tts_enabled: bool = True
+    tts_streaming_enabled: bool = True
     tts_provider: str = "edge"  # edge, piper, windows, fake
     tts_voice: str = "en-GB-RyanNeural"
     tts_rate: str = "+0%"
@@ -211,6 +215,21 @@ class DenverSettings:
     location_cache_ttl_seconds: int = 600
     location_timeout_seconds: float = 5.0
 
+    # Email Automation & Continuous Inbox Monitoring
+    email_enabled: bool = True
+    email_imap_server: str = "imap.gmail.com"
+    email_imap_port: int = 993
+    email_smtp_server: str = "smtp.gmail.com"
+    email_smtp_port: int = 587
+    email_smtp_use_tls: bool = True
+    email_username: str = ""
+    email_password: str = ""
+    email_use_ssl: bool = True
+    email_mailbox: str = "INBOX"
+    email_poll_interval_seconds: float = 180.0
+    email_auto_summarize: bool = True
+    email_mock_mode: bool = False
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> DenverSettings:
         """Construct settings from environment dictionary or os.environ."""
@@ -257,7 +276,7 @@ class DenverSettings:
             groq_enabled=_parse_bool(source.get("DENVER_GROQ_ENABLED"), True),
             groq_base_url=source.get("DENVER_GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
             groq_api_key=source.get("DENVER_GROQ_API_KEY", source.get("GROQ_API_KEY", "")),
-            groq_model=source.get("DENVER_GROQ_MODEL", "llama-3.1-8b-instant"),
+            groq_model=source.get("DENVER_GROQ_MODEL", "llama-3.3-70b-versatile"),
             gemini_enabled=_parse_bool(source.get("DENVER_GEMINI_ENABLED"), True),
             gemini_base_url=source.get("DENVER_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
             gemini_api_key=source.get("DENVER_GEMINI_API_KEY", source.get("GEMINI_API_KEY", "")),
@@ -305,6 +324,7 @@ class DenverSettings:
             screen_awareness_hotkey_enabled=_parse_bool(source.get("DENVER_SCREEN_AWARENESS_HOTKEY_ENABLED"), True),
             screen_awareness_hotkey=source.get("DENVER_SCREEN_AWARENESS_HOTKEY", "ctrl+alt+s"),
             screen_cloud_disclosure_acknowledged=_parse_bool(source.get("DENVER_SCREEN_CLOUD_DISCLOSURE_ACKNOWLEDGED"), False),
+            security_profile=source.get("DENVER_SECURITY_PROFILE", "normal").strip().lower(),
             allow_destructive_actions=_parse_bool(source.get("DENVER_ALLOW_DESTRUCTIVE_ACTIONS"), False),
             action_sequence_delay=_parse_float(source.get("DENVER_ACTION_SEQUENCE_DELAY"), 0.1),
             app_launch_delay=_parse_float(source.get("DENVER_APP_LAUNCH_DELAY"), 0.2),
@@ -337,12 +357,25 @@ class DenverSettings:
             location_provider_fallback=source.get("DENVER_LOCATION_PROVIDER_FALLBACK", "ip-api.com"),
             location_cache_ttl_seconds=_parse_int(source.get("DENVER_LOCATION_CACHE_TTL_SECONDS"), 600),
             location_timeout_seconds=_parse_float(source.get("DENVER_LOCATION_TIMEOUT_SECONDS"), 5.0),
+            email_enabled=_parse_bool(source.get("DENVER_EMAIL_ENABLED"), True),
+            email_imap_server=source.get("DENVER_EMAIL_IMAP_SERVER", "imap.gmail.com"),
+            email_imap_port=_parse_int(source.get("DENVER_EMAIL_IMAP_PORT"), 993),
+            email_smtp_server=source.get("DENVER_EMAIL_SMTP_SERVER", "smtp.gmail.com"),
+            email_smtp_port=_parse_int(source.get("DENVER_EMAIL_SMTP_PORT"), 587),
+            email_smtp_use_tls=_parse_bool(source.get("DENVER_EMAIL_SMTP_USE_TLS"), True),
+            email_username=source.get("DENVER_EMAIL_USERNAME", ""),
+            email_password=source.get("DENVER_EMAIL_PASSWORD", ""),
+            email_use_ssl=_parse_bool(source.get("DENVER_EMAIL_USE_SSL"), True),
+            email_mailbox=source.get("DENVER_EMAIL_MAILBOX", "INBOX"),
+            email_poll_interval_seconds=_parse_float(source.get("DENVER_EMAIL_POLL_INTERVAL_SECONDS"), 180.0),
+            email_auto_summarize=_parse_bool(source.get("DENVER_EMAIL_AUTO_SUMMARIZE"), True),
+            email_mock_mode=_parse_bool(source.get("DENVER_EMAIL_MOCK_MODE"), False),
         )
 
     def to_safe_dict(self) -> dict[str, Any]:
         """Export settings with sensitive credentials masked."""
         data = {}
-        sensitive_keys = {"groq_api_key", "gemini_api_key", "google_maps_api_key", "spotify_client_secret"}
+        sensitive_keys = {"groq_api_key", "gemini_api_key", "google_maps_api_key", "spotify_client_secret", "email_password"}
         for k, v in self.__dict__.items():
             if k in sensitive_keys:
                 data[k] = "***" if v else ""

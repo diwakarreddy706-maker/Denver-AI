@@ -22,6 +22,12 @@ class WindowManager:
     def __init__(self, native_api: WindowsNativeAPI | None = None) -> None:
         self.api = native_api or WindowsNativeAPI()
 
+    def get_active_window(self) -> WindowInfo | None:
+        """Retrieve metadata for the currently focused foreground window."""
+        if not self.api.is_available:
+            return None
+        return self.api.get_foreground_window()
+
     def find_windows(self, query: str) -> list[WindowInfo]:
         """Search top-level visible windows by substring match against title."""
         if not self.api.is_available:
