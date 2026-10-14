@@ -1,9 +1,39 @@
 # 🛰️ Denver AI Assistant — Project Checkpoint & State Manifest
 
-> **Last Updated:** October 9, 2026 (22:35 IST)  
+> **Last Updated:** October 14, 2026 (22:30 IST)  
 > **Environment:** Windows 11 Pro, Python 3.14.7  
 > **Repository:** `C:\Users\diwak\Desktop\AI`  
-> **Active Status:** ✅ **All 7 HUD Sci-Fi Upgrades Completed & 100% Operational**
+> **Active Status:** ✅ **Strict Wake Word Verification & Anti-Hallucination Audio Pipeline Complete (667/667 Tests Passing)**
+
+---
+
+## 🎙️ Strict Wake Word Verification, Spoken Replies & Anti-Hallucination Immunity (October 14, 2026) — ✅ COMPLETED
+1. **Strict Two-Stage Wake Verification (`src/denver/audio/wakeword.py`, `src/denver/audio/pipeline.py`)**:
+   - `FallbackWakeWordDetector` acts as an ultra-fast, zero-network acoustic energy first gate (150ms energy burst).
+   - Upon trigger, `_handle_wake_detection` captures the ~1.5s rolling pre-roll audio buffer (`deque(maxlen=40)`) and verifies the candidate utterance via STT.
+   - `check_strict_wake_phrase` strictly enforces exact phrase matching against configurable accepted phrases (`wake_word_accepted_phrases`), allowing natural mishears (`"denver"`, `"hey denver"`, `"hay denver"`, `"denvar"`, `"danver"`, `"denber"`).
+   - Unrelated words (e.g. `"hello everyone"`) and ambient noise are dropped silently without waking Denver, lighting the overlay, or playing sounds.
+2. **Conversational Spoken Wake Reply & Single-Sentence Command Extraction**:
+   - On valid wake without an immediate command, Denver randomly selects and speaks one of 4 short phrases: `"Yes?"`, `"I'm listening."`, `"Go ahead."`, `"At your service."` (configurable via `wake_replies` and `wake_reply_enabled`).
+   - If the user utters a command in the same sentence (e.g., `"Hey Denver, open Chrome"`), the trailing command is extracted, the spoken reply is bypassed, and the command executes immediately.
+3. **Anti-Hallucination Unbiased Transcription (`src/denver/audio/stt.py`)**:
+   - `GroqWhisperSTTProvider.transcribe()` and `WhisperSTTProvider.transcribe()` support optional `prompt` and `response_format` parameters.
+   - During wake verification, `prompt=""` and `response_format="verbose_json"` are passed, completely eliminating the domain prompt bias that previously caused Whisper to hallucinate `"Denver"` on room noise.
+   - Normal commands preserve the domain prompt to assist technical vocabulary recognition.
+   - Rejects candidate transcripts with high `no_speech_prob > 0.6` or low `avg_logprob < -1.0`.
+4. **Pre-STT Voiced Speech Gate & Standalone Word Duration Filter**:
+   - Prior to making external STT network requests, `_handle_wake_detection` validates that the audio clip contains voiced speech chunks above the calibrated VAD threshold. Clips without voiced speech are rejected with zero network calls.
+   - Standalone wake words without trailing commands require at least **0.4 seconds** of voiced audio frames, filtering out transient clicks, coughs, and desk bumps.
+5. **Self-Wake Immunity & Cooldown Debounce**:
+   - Microphone input is muted and ignored while wake replies or TTS responses are playing (`playback.is_playing` or `_is_speaking_wake_reply`).
+   - Post-speech audio buffers are cleared and an enforced 1.5s debounce cooldown (`wake_word_cooldown_seconds`) prevents speaker reverberation echoes from triggering false re-wakes.
+   - 6.0-second silence timeout returns Denver from `LISTENING` back to `STANDBY` if no command speech follows.
+6. **Diagnostic Observability & Code Path Tracing**:
+   - Structured `Wake trigger:` logs record detector name, frame energy, score, clip average energy, STT raw text, match status, and final decision (`WAKE` or `REJECTED`).
+   - Dedicated `[LISTENING_PATH]` logs trace the exact activation source (`push-to-talk`, `wake_word`, `follow-up listening`, or `barge-in`).
+7. **Comprehensive Unit & Integration Test Suite**:
+   - Added unit test suite in `tests/unit/test_voice_pipeline.py` and `tests/unit/test_wakeword.py`.
+   - Full regression suite verified: **667 / 667 passed (100%)**.
 
 ---
 
