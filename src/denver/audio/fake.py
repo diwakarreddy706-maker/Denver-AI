@@ -157,8 +157,16 @@ class FakeSTTProvider(SpeechToTextProvider):
     def is_available(self) -> bool:
         return not self.should_fail
 
-    async def transcribe(self, audio_bytes: bytes, audio_format: AudioFormat | None = None) -> Transcript:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        audio_format: AudioFormat | None = None,
+        prompt: str | None = None,
+        response_format: str = "json",
+    ) -> Transcript:
         self.transcribe_count += 1
+        self.last_prompt = prompt
+        self.last_response_format = response_format
         if self.should_fail:
             raise RuntimeError("Fake STT simulated failure")
 
@@ -169,6 +177,8 @@ class FakeSTTProvider(SpeechToTextProvider):
             language="en",
             latency_ms=10.0,
             provider=self.name,
+            no_speech_prob=getattr(self, "canned_no_speech_prob", 0.0),
+            avg_logprob=getattr(self, "canned_avg_logprob", 0.0),
         )
 
 

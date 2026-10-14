@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import random
+import struct
 import time
 from typing import Any
 
@@ -17,6 +19,7 @@ from denver.audio.models import (
     TTSRequest,
     TTSResult,
     VoiceActivityState,
+    WakeWordResult,
 )
 from denver.audio.playback import AudioPlayback
 from denver.audio.push_to_talk import PushToTalkListener
@@ -25,7 +28,7 @@ from denver.audio.stt import GroqWhisperSTTProvider, SpeechToTextProvider, Whisp
 from denver.audio.tts import EdgeTTSProvider, TextToSpeechProvider, WindowsTTSProvider, clean_text_for_speech
 from denver.audio.tts_queue import DenverTTSQueue, TTSPriority
 from denver.audio.vad import EnergyVAD, VADEngine
-from denver.audio.wakeword import FallbackWakeWordDetector, WakeWordDetector
+from denver.audio.wakeword import FallbackWakeWordDetector, WakeWordDetector, check_strict_wake_phrase
 from denver.commands.models import CommandRequest
 from denver.commands.service import CommandEngineService
 from denver.config.settings import DenverSettings, get_settings
@@ -135,6 +138,8 @@ class VoicePipeline:
         self._loop_task: asyncio.Task[Any] | None = None
         self._current_speech_chunks: list[AudioChunk] = []
         self._preroll_chunks: collections.deque[AudioChunk] = collections.deque(maxlen=6)
+        self._ring_buffer: collections.deque[AudioChunk] = collections.deque(maxlen=40)
+        self._is_speaking_wake_reply: bool = False
         self.last_latency_metrics: dict[str, float] = {}
 
     @property
@@ -233,6 +238,7 @@ class VoicePipeline:
         self._listening_start_time = time.time()
         self._notify_overlay("LISTENING")
         if self.state_machine and self.state_machine.can_transition_to(DenverState.LISTENING):
+            logger.info("[LISTENING_PATH] Code path entered LISTENING: push-to-talk (source: manual activation / hotkey / UI button)")
             await self.state_machine.transition_to(
                 DenverState.LISTENING,
                 reason="Push-to-talk manual voice activation",
@@ -281,9 +287,11 @@ class VoicePipeline:
         try:
             noise_floor = await self.capture.calibrate_noise_floor(duration_seconds=0.3)
             if hasattr(self.vad, "energy_threshold"):
-                self.vad.energy_threshold = max(float(self.vad.energy_threshold), noise_floor + 0.015)
+                current_vad_th = float(getattr(self.vad, "energy_threshold", 0.0))
+                setattr(self.vad, "energy_threshold", max(current_vad_th, noise_floor + 0.015))
             if hasattr(self.wakeword, "threshold"):
-                self.wakeword.threshold = max(float(self.wakeword.threshold), noise_floor + 0.025)
+                current_ww_th = float(getattr(self.wakeword, "threshold", 0.0))
+                setattr(self.wakeword, "threshold", max(current_ww_th, noise_floor + 0.025))
             logger.info(
                 "Acoustic calibration complete: noise floor=%.4f, VAD threshold=%.4f, Wake threshold=%.4f",
                 noise_floor,
@@ -336,6 +344,7 @@ class VoicePipeline:
         await self.playback.stop()
         self.tts_queue.interrupt()
         self.capture.clear()
+        self._ring_buffer.clear()
         self._current_speech_chunks.clear()
         self._preroll_chunks.clear()
         logger.info("Voice pipeline cleanly shut down.")
@@ -353,6 +362,7 @@ class VoicePipeline:
                 AudioPlaybackStopped(reason="barge_in")
             )
             if self.state_machine and self.state_machine.can_transition_to(DenverState.LISTENING):
+                logger.info("[LISTENING_PATH] Code path entered LISTENING: barge-in (source: user barge-in interrupted speech playback)")
                 await self.state_machine.transition_to(
                     DenverState.LISTENING,
                     reason="User barge-in interrupted speech playback",
@@ -371,6 +381,9 @@ class VoicePipeline:
 
                 # 1. Check for barge-in if currently speaking
                 if curr_state == DenverState.SPEAKING:
+                    # Do not listen or allow self-interruption while speaking wake reply
+                    if getattr(self, "_is_speaking_wake_reply", False):
+                        continue
                     vad_res = self.vad.process_chunk(chunk)
                     if vad_res.is_speech and vad_res.energy >= (self.settings.vad_threshold * 0.05):
                         await self._handle_barge_in(chunk)
@@ -378,34 +391,24 @@ class VoicePipeline:
 
                 # 2. If in STANDBY mode, monitor for wake-word activation
                 if curr_state == DenverState.STANDBY:
+                    # Ignore mic while playback is active or speaking wake reply (never wake itself)
+                    if self.playback.is_playing or self.tts_queue.is_speaking or getattr(self, "_is_speaking_wake_reply", False):
+                        continue
+
+                    # Maintain rolling ~1.5-2.0s buffer of chunks
+                    self._ring_buffer.append(chunk)
+
                     if self.settings.wake_word_enabled:
                         wake_res = self.wakeword.process_chunk(chunk)
                         if wake_res.detected:
-                            logger.info("Acoustic wake word '%s' detected (Confidence: %.2f)", wake_res.wake_word, wake_res.confidence)
-                            self._notify_overlay("LISTENING")
-                            await self.event_bus.publish(
-                                WakeWordDetected(
-                                    wake_word=wake_res.wake_word,
-                                    confidence=wake_res.confidence,
-                                    detector_type=wake_res.detector_type,
-                                )
+                            logger.info(
+                                "Wake gate triggered (first gate): detector=%s, chunk_energy=%.4f, score=%.4f, threshold=%.4f",
+                                self.wakeword.__class__.__name__,
+                                chunk.energy,
+                                wake_res.confidence,
+                                getattr(self.wakeword, "threshold", 0.0),
                             )
-                            if self.state_machine and self.state_machine.can_transition_to(DenverState.LISTENING):
-                                try:
-                                    asyncio.create_task(self.playback.play_listening_chime())
-                                except Exception:
-                                    pass
-                                await self.state_machine.transition_to(
-                                    DenverState.LISTENING,
-                                    reason=f"Wake word '{wake_res.wake_word}' detected",
-                                )
-                                self._current_speech_chunks.clear()
-                                self.vad.reset()
-                                self._listening_start_time = time.time()
-                            else:
-                                self._current_speech_chunks.clear()
-                                self.vad.reset()
-                                self._listening_start_time = time.time()
+                            await self._handle_wake_detection(wake_res=wake_res, trigger_chunk=chunk)
                     continue
 
                 # 3. If in LISTENING mode, accumulate speech frames until silence hangover
@@ -443,17 +446,250 @@ class VoicePipeline:
                                 await self.state_machine.transition_to(DenverState.STANDBY, reason="Empty speech buffer")
                     elif not self._current_speech_chunks:
                         self._preroll_chunks.append(chunk)
-                        if time.time() - getattr(self, "_listening_start_time", 0.0) > 8.0:
-                            # Listening timeout without speech
+                        silence_timeout = getattr(self.settings, "wake_silence_timeout_seconds", 6.0)
+                        if time.time() - getattr(self, "_listening_start_time", 0.0) > silence_timeout:
+                            # Listening timeout without speech (6 seconds)
                             self._notify_overlay("STANDBY")
                             if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
-                                await self.state_machine.transition_to(DenverState.STANDBY, reason="Listening timeout (no speech)")
+                                await self.state_machine.transition_to(
+                                    DenverState.STANDBY,
+                                    reason=f"Listening timeout (no speech within {silence_timeout}s)",
+                                )
+                            self._preroll_chunks.clear()
 
         except asyncio.CancelledError:
             pass
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Voice pipeline exception: %s", exc)
             await self.event_bus.publish(AudioError(subsystem="pipeline", error=str(exc), fatal=False))
+
+    async def _handle_wake_detection(
+        self,
+        wake_res: WakeWordResult | None = None,
+        trigger_chunk: AudioChunk | None = None,
+    ) -> None:
+        """Strictly verify wake candidate using STT, speak wake reply, and begin listening."""
+        detector_name = self.wakeword.__class__.__name__
+        score = wake_res.confidence if wake_res else 1.0
+        trigger_energy = trigger_chunk.energy if trigger_chunk else (self._ring_buffer[-1].energy if self._ring_buffer else 0.0)
+
+        # 1. Gather short audio clip of about 1.5s from the ring buffer leading up to trigger
+        clip_chunks = list(self._ring_buffer)[-30:]
+        clip_pcm = b"".join(c.data for c in clip_chunks)
+
+        def _get_chunk_energy(c: AudioChunk) -> float:
+            if c.energy > 0.0:
+                return c.energy
+            if len(c.data) < 2:
+                return 0.0
+            count = len(c.data) // 2
+            try:
+                shorts = struct.unpack(f"<{count}h", c.data[:count * 2])
+                sum_sq = sum(s * s for s in shorts)
+                return (sum_sq / float(count)) ** 0.5 / 32768.0
+            except Exception:
+                return 0.0
+
+        speech_threshold = getattr(self.vad, "energy_threshold", None)
+        if speech_threshold is None:
+            speech_threshold = max(0.015, float(getattr(self.settings, "vad_threshold", 0.5)) * 0.04)
+        chunk_energies = [_get_chunk_energy(c) for c in clip_chunks]
+        clip_energy = (sum(chunk_energies) / len(chunk_energies)) if chunk_energies else 0.0
+        max_chunk_energy = max(chunk_energies, default=0.0)
+        voiced_chunks = [c for c, e in zip(clip_chunks, chunk_energies) if e >= speech_threshold]
+        voiced_duration_seconds = sum(c.duration_ms for c in voiced_chunks) / 1000.0
+
+        # Pre-STT check: reject clip if no voiced speech or energy is below threshold (no network call)
+        if not clip_pcm or not voiced_chunks or max_chunk_energy < speech_threshold:
+            logger.info(
+                "Wake trigger: REJECTED | detector=%s, energy=%.4f (clip_avg=%.4f, max=%.4f, threshold=%.4f), voiced_sec=%.2fs, matched=False, decision=REJECTED (no voiced speech)",
+                detector_name,
+                trigger_energy,
+                clip_energy,
+                max_chunk_energy,
+                speech_threshold,
+                voiced_duration_seconds,
+            )
+            return
+
+        # 2. Transcribe clip with existing STT (pass prompt="" to prevent hallucination, verbose_json for confidence metrics)
+        stt_text = ""
+        no_speech_prob = 0.0
+        avg_logprob = 0.0
+        try:
+            transcript = await self.stt.transcribe(
+                clip_pcm,
+                self.format,
+                prompt="",
+                response_format="verbose_json",
+            )
+            if transcript and transcript.text:
+                stt_text = transcript.text.strip()
+                no_speech_prob = getattr(transcript, "no_speech_prob", 0.0)
+                avg_logprob = getattr(transcript, "avg_logprob", 0.0)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Wake candidate STT verification error: %s", exc)
+            stt_text = ""
+
+        # Reject hallucinations marked by high no_speech_prob (> 0.6) or low avg_logprob (< -1.0)
+        if no_speech_prob > 0.6 or (avg_logprob < -1.0 and avg_logprob != 0.0):
+            logger.info(
+                "Wake trigger: REJECTED | detector=%s, energy=%.4f (clip_avg=%.4f), score=%.4f, transcript='%s', matched=False, decision=REJECTED (hallucination detected: no_speech_prob=%.2f, avg_logprob=%.2f)",
+                detector_name,
+                trigger_energy,
+                clip_energy,
+                score,
+                stt_text,
+                no_speech_prob,
+                avg_logprob,
+            )
+            return
+
+        # 3. Strict wake word check
+        accepted = getattr(
+            self.settings,
+            "wake_word_accepted_phrases",
+            ("denver", "hey denver", "denvar", "danver", "denber", "hay denver"),
+        )
+        is_valid, matched_phrase, trailing_cmd = check_strict_wake_phrase(stt_text, accepted)
+
+        if not is_valid:
+            logger.info(
+                "Wake trigger: REJECTED | detector=%s, energy=%.4f (clip_avg=%.4f), score=%.4f, transcript='%s', matched=False, decision=REJECTED",
+                detector_name,
+                trigger_energy,
+                clip_energy,
+                score,
+                stt_text,
+            )
+            # Ignore and return to STANDBY with no overlay and no sound
+            return
+
+        # 4. Reject standalone wake words with voiced duration < 0.4s (real "Denver" lasts longer than a transient click)
+        if not trailing_cmd and voiced_duration_seconds < 0.4:
+            logger.info(
+                "Wake trigger: REJECTED | detector=%s, energy=%.4f (clip_avg=%.4f), score=%.4f, transcript='%s', matched=True, phrase='%s', decision=REJECTED (voiced duration %.2fs < 0.4s for standalone wake word)",
+                detector_name,
+                trigger_energy,
+                clip_energy,
+                score,
+                stt_text,
+                matched_phrase,
+                voiced_duration_seconds,
+            )
+            return
+
+        logger.info(
+            "Wake trigger: WAKE | detector=%s, energy=%.4f (clip_avg=%.4f, max=%.4f), voiced_sec=%.2fs, score=%.4f, transcript='%s', matched=True, phrase='%s', trailing_command='%s', decision=WAKE",
+            detector_name,
+            trigger_energy,
+            clip_energy,
+            max_chunk_energy,
+            voiced_duration_seconds,
+            score,
+            stt_text,
+            matched_phrase,
+            trailing_cmd,
+        )
+        await self.event_bus.publish(
+            WakeWordDetected(
+                wake_word=matched_phrase,
+                confidence=1.0,
+                detector_type="strict_stt",
+            )
+        )
+
+        # 4. Handle one-sentence command: "Hey Denver, open Chrome"
+        if trailing_cmd:
+            logger.info("One-sentence command detected with wake word: '%s'", trailing_cmd)
+            self._notify_overlay("PROCESSING")
+            self._notify_overlay_subtitle(f"> {trailing_cmd}")
+            if self.state_machine and self.state_machine.can_transition_to(DenverState.PROCESSING):
+                await self.state_machine.transition_to(
+                    DenverState.PROCESSING,
+                    reason=f"One-sentence voice command: {trailing_cmd}",
+                )
+
+            await self.event_bus.publish(
+                TranscriptProduced(
+                    text=trailing_cmd,
+                    confidence=1.0,
+                    provider=self.stt.name,
+                    latency_ms=0.0,
+                )
+            )
+
+            self._ring_buffer.clear()
+            self._current_speech_chunks.clear()
+            self._preroll_chunks.clear()
+            self.vad.reset()
+
+            cmd_response = await self.command_service.process_command(
+                CommandRequest(raw_text=trailing_cmd, source="voice")
+            )
+            await self._handle_command_response_and_tts(cmd_response)
+            return
+
+        # 5. Pure wake (no command): speak short spoken wake reply and start listening
+        self._notify_overlay("LISTENING")
+
+        if self.settings.wake_reply_enabled and self.settings.tts_enabled:
+            replies = getattr(
+                self.settings,
+                "wake_replies",
+                ("Yes?", "I'm listening.", "Go ahead.", "At your service."),
+            )
+            wake_reply = random.choice(replies) if replies else "I'm listening."
+
+            self._is_speaking_wake_reply = True
+            if self.state_machine and self.state_machine.can_transition_to(DenverState.SPEAKING):
+                await self.state_machine.transition_to(DenverState.SPEAKING, reason="Speaking wake reply")
+            self._notify_overlay_subtitle(f"Denver: {wake_reply}")
+
+            try:
+                tts_res, provider = await self._synthesize_with_fallback(TTSRequest(text=wake_reply))
+                if tts_res.success and tts_res.audio_data:
+                    await self.event_bus.publish(TTSStarted(text=wake_reply, provider=provider))
+                    await self.event_bus.publish(
+                        TTSCompleted(
+                            text=wake_reply,
+                            duration_seconds=tts_res.duration_seconds,
+                            latency_ms=tts_res.latency_ms,
+                            provider=provider,
+                        )
+                    )
+                    await self.event_bus.publish(AudioPlaybackStarted(duration_seconds=tts_res.duration_seconds))
+                    await self.playback.play_bytes(tts_res.audio_data, format=tts_res.format)
+                    await self.event_bus.publish(AudioPlaybackCompleted(duration_seconds=tts_res.duration_seconds))
+                    await asyncio.sleep(0.15)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Wake reply playback failed: %s", exc)
+            finally:
+                self._is_speaking_wake_reply = False
+
+        # Clear any audio captured during playback so Denver never wakes itself
+        self.capture.clear()
+        self._ring_buffer.clear()
+        self._current_speech_chunks.clear()
+        self._preroll_chunks.clear()
+        self.vad.reset()
+        self.wakeword.reset()
+
+        cooldown = getattr(self.settings, "wake_word_cooldown_seconds", 1.5)
+        if hasattr(self.wakeword, "_last_trigger_time"):
+            setattr(self.wakeword, "_last_trigger_time", time.time() + cooldown)
+
+        if self.state_machine and self.state_machine.can_transition_to(DenverState.LISTENING):
+            logger.info(
+                "[LISTENING_PATH] Code path entered LISTENING: wake_word (source: wake phrase '%s', reply finished)",
+                matched_phrase,
+            )
+            await self.state_machine.transition_to(
+                DenverState.LISTENING,
+                reason="Wake reply completed, listening for command",
+            )
+        self._notify_overlay("LISTENING")
+        self._listening_start_time = time.time()
 
     async def _process_utterance(self, chunks: list[AudioChunk] | None = None) -> None:
         """Process finalized speech buffer through STT, Command Engine, and TTS."""
@@ -514,60 +750,67 @@ class VoicePipeline:
 
         cmd_response = None
         if not stream_handled:
-            # Command Engine Processing (Authoritative Execution & Safety)
             cmd_response = await self.command_service.process_command(
                 CommandRequest(raw_text=clean_text, source="voice")
             )
+        await self._handle_command_response_and_tts(cmd_response, t_request_start=t_request_start)
 
-            if cmd_response and cmd_response.action_name:
-                act = cmd_response.action_name
-                icon = "🚀"
-                if "weather" in act:
-                    icon = "🌤"
-                elif "email" in act:
-                    icon = "📧"
-                elif "git" in act:
-                    icon = "🌱"
-                elif "lock" in act:
-                    icon = "🔒"
-                elif "note" in act or "file" in act:
-                    icon = "📝"
-                elif "calendar" in act:
-                    icon = "📅"
-                self._notify_overlay_receipt(icon, act.replace("_", " ").title(), cmd_response.message[:40] if cmd_response.message else "")
+    async def _handle_command_response_and_tts(
+        self,
+        cmd_response: Any,
+        t_request_start: float | None = None,
+    ) -> None:
+        """Handle UI notifications, action receipts, TTS synthesis, playback, and return to STANDBY."""
+        if cmd_response and cmd_response.action_name:
+            act = cmd_response.action_name
+            icon = "🚀"
+            if "weather" in act:
+                icon = "🌤"
+            elif "email" in act:
+                icon = "📧"
+            elif "git" in act:
+                icon = "🌱"
+            elif "lock" in act:
+                icon = "🔒"
+            elif "note" in act or "file" in act:
+                icon = "📝"
+            elif "calendar" in act:
+                icon = "📅"
+            self._notify_overlay_receipt(icon, act.replace("_", " ").title(), cmd_response.message[:40] if cmd_response.message else "")
 
-            # 4. Text-to-Speech (TTS) Synthesis (Whole-Utterance Fallback)
-            if cmd_response.message and self.settings.tts_enabled:
-                clean_speech = clean_text_for_speech(cmd_response.message)
-                if not clean_speech:
-                    clean_speech = "Task completed."
+        # Text-to-Speech (TTS) Synthesis (Whole-Utterance Fallback)
+        if cmd_response and cmd_response.message and self.settings.tts_enabled:
+            clean_speech = clean_text_for_speech(cmd_response.message)
+            if not clean_speech:
+                clean_speech = "Task completed."
 
-                self._notify_overlay_subtitle(f"Denver: {clean_speech[:60]}")
+            self._notify_overlay_subtitle(f"Denver: {clean_speech[:60]}")
 
-                # Transition: EXECUTING/PROCESSING -> SPEAKING
-                self._notify_overlay("SPEAKING")
-                if self.state_machine and self.state_machine.can_transition_to(DenverState.SPEAKING):
-                    await self.state_machine.transition_to(
-                        DenverState.SPEAKING,
-                        reason="Speaking response",
+            # Transition: EXECUTING/PROCESSING -> SPEAKING
+            self._notify_overlay("SPEAKING")
+            if self.state_machine and self.state_machine.can_transition_to(DenverState.SPEAKING):
+                await self.state_machine.transition_to(
+                    DenverState.SPEAKING,
+                    reason="Speaking response",
+                )
+
+            t_tts_start = time.perf_counter()
+            tts_res, provider_used = await self._synthesize_with_fallback(TTSRequest(text=clean_speech))
+            t_tts_ready = time.perf_counter()
+
+            if tts_res.success and tts_res.audio_data:
+                await self.event_bus.publish(TTSStarted(text=clean_speech, provider=provider_used))
+                await self.event_bus.publish(
+                    TTSCompleted(
+                        text=clean_speech,
+                        duration_seconds=tts_res.duration_seconds,
+                        latency_ms=tts_res.latency_ms,
+                        provider=provider_used,
                     )
+                )
 
-                t_tts_start = time.perf_counter()
-                tts_res, provider_used = await self._synthesize_with_fallback(TTSRequest(text=clean_speech))
-                t_tts_ready = time.perf_counter()
-
-                if tts_res.success and tts_res.audio_data:
-                    await self.event_bus.publish(TTSStarted(text=clean_speech, provider=provider_used))
-                    await self.event_bus.publish(
-                        TTSCompleted(
-                            text=clean_speech,
-                            duration_seconds=tts_res.duration_seconds,
-                            latency_ms=tts_res.latency_ms,
-                            provider=provider_used,
-                        )
-                    )
-
-                    t_audio_play = time.perf_counter()
+                t_audio_play = time.perf_counter()
+                if t_request_start is not None:
                     self.last_latency_metrics = {
                         "request_start": t_request_start,
                         "first_sentence_detected": t_tts_start,
@@ -583,23 +826,28 @@ class VoicePipeline:
                         self.last_latency_metrics["total_latency_seconds"],
                     )
 
-                    await self.event_bus.publish(AudioPlaybackStarted(duration_seconds=tts_res.duration_seconds))
-                    played = await self.playback.play_bytes(tts_res.audio_data, format=tts_res.format)
-                    if played:
-                        await self.event_bus.publish(AudioPlaybackCompleted(duration_seconds=tts_res.duration_seconds))
-                    # Allow room acoustics / speaker reverberation to dissipate
-                    await asyncio.sleep(0.25)
+                await self.event_bus.publish(AudioPlaybackStarted(duration_seconds=tts_res.duration_seconds))
+                played = await self.playback.play_bytes(tts_res.audio_data, format=tts_res.format)
+                if played:
+                    await self.event_bus.publish(AudioPlaybackCompleted(duration_seconds=tts_res.duration_seconds))
+                # Allow room acoustics / speaker reverberation to dissipate
+                await asyncio.sleep(0.25)
 
-        # 5. Clear residual speaker audio & debounce wake word
+        # Clear residual speaker audio & debounce wake word
         self.capture.clear()
+        self._ring_buffer.clear()
         self.vad.reset()
         self.wakeword.reset()
+        cooldown = getattr(self.settings, "wake_word_cooldown_seconds", 1.5)
         if hasattr(self.wakeword, "_last_trigger_time"):
-            self.wakeword._last_trigger_time = time.time() + 0.6  # 600ms grace period against speaker echo
+            setattr(self.wakeword, "_last_trigger_time", time.time() + cooldown)
 
-        # 6. If user invoked assistant greeting/call, immediately transition back to LISTENING
-        if cmd_response and cmd_response.action_name == "assistant_call":
+        # If user invoked assistant greeting/call, immediately transition back to LISTENING if successful
+        if cmd_response and cmd_response.action_name == "assistant_call" and cmd_response.success:
             if self.state_machine and self.state_machine.can_transition_to(DenverState.LISTENING):
+                logger.info(
+                    "[LISTENING_PATH] Code path entered LISTENING: follow-up listening (source: assistant_call command response)"
+                )
                 self._current_speech_chunks.clear()
                 self._preroll_chunks.clear()
                 self._listening_start_time = time.time()
@@ -610,7 +858,7 @@ class VoicePipeline:
                 self._notify_overlay("LISTENING")
                 return
 
-        # 7. Return to STANDBY
+        # Return to STANDBY
         self._notify_overlay("STANDBY")
         if self.state_machine and self.state_machine.can_transition_to(DenverState.STANDBY):
             await self.state_machine.transition_to(

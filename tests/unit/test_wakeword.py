@@ -57,3 +57,77 @@ def test_fake_wakeword_detector() -> None:
     assert r2.detected
     assert r2.wake_word == "Denver"
     assert r2.detector_type == "fake"
+
+
+def test_strict_wake_phrase_valid_mishears() -> None:
+    from denver.audio.wakeword import check_strict_wake_phrase
+
+    valid_inputs = [
+        ("Denver", "denver", ""),
+        ("Hey Denver", "hey denver", ""),
+        ("hey denver.", "hey denver", ""),
+        ("Hay Denver", "hay denver", ""),
+        ("Danver", "danver", ""),
+        ("Denvar", "denvar", ""),
+        ("Denber", "denber", ""),
+        ("Oh hey denver", "hey denver", ""),
+        ("Um Denver", "denver", ""),
+    ]
+    for text, expected_phrase, expected_trailing in valid_inputs:
+        is_valid, matched, trailing = check_strict_wake_phrase(text)
+        assert is_valid is True, f"Failed for valid input: {text}"
+        assert matched == expected_phrase
+        assert trailing == expected_trailing
+
+
+def test_strict_wake_phrase_one_sentence_command() -> None:
+    from denver.audio.wakeword import check_strict_wake_phrase
+
+    is_valid, matched, trailing = check_strict_wake_phrase("Hey Denver, open Chrome")
+    assert is_valid is True
+    assert matched == "hey denver"
+    assert trailing == "open Chrome"
+
+    is_valid, matched, trailing = check_strict_wake_phrase("Denver, what time is it?")
+    assert is_valid is True
+    assert matched == "denver"
+    assert trailing == "what time is it?"
+
+    is_valid, matched, trailing = check_strict_wake_phrase("Danver launch notepad")
+    assert is_valid is True
+    assert matched == "danver"
+    assert trailing == "launch notepad"
+
+
+def test_strict_wake_phrase_rejected() -> None:
+    from denver.audio.wakeword import check_strict_wake_phrase
+
+    rejected_inputs = [
+        "hello everyone",
+        "good morning",
+        "play synthwave",
+        "turn on the lights",
+        "just random background noise",
+        "",
+        "   ",
+        "...",
+    ]
+    for text in rejected_inputs:
+        is_valid, matched, trailing = check_strict_wake_phrase(text)
+        assert is_valid is False, f"Should have rejected: {text}"
+        assert matched == ""
+        assert trailing == ""
+
+
+def test_strict_wake_phrase_custom_config_list() -> None:
+    from denver.audio.wakeword import check_strict_wake_phrase
+
+    custom_phrases = ("computer", "hey computer")
+    is_valid, matched, trailing = check_strict_wake_phrase("Hey Computer, status report", accepted_phrases=custom_phrases)
+    assert is_valid is True
+    assert matched == "hey computer"
+    assert trailing == "status report"
+
+    # Denver should now be rejected with custom list
+    is_valid, _, _ = check_strict_wake_phrase("Denver", accepted_phrases=custom_phrases)
+    assert is_valid is False

@@ -3,13 +3,55 @@
 from __future__ import annotations
 
 import abc
+import re
 import time
-from typing import Any
+from typing import Any, Sequence
 
 from denver.audio.models import AudioChunk, WakeWordResult
 from denver.logging.logger import get_logger
 
 logger = get_logger("audio.wakeword")
+
+DEFAULT_ACCEPTED_WAKE_PHRASES: tuple[str, ...] = (
+    "denver",
+    "hey denver",
+    "denvar",
+    "danver",
+    "denber",
+    "hay denver",
+)
+
+
+def check_strict_wake_phrase(
+    transcript_text: str,
+    accepted_phrases: Sequence[str] = DEFAULT_ACCEPTED_WAKE_PHRASES,
+) -> tuple[bool, str, str]:
+    """Strictly verify whether a transcript contains an accepted wake word.
+
+    Returns:
+        (is_valid, matched_phrase, trailing_command)
+    """
+    if not transcript_text:
+        return False, "", ""
+    raw = transcript_text.strip()
+    if not raw:
+        return False, "", ""
+
+    # Sort phrases by word length descending so "hey denver" is matched before "denver"
+    sorted_phrases = sorted(accepted_phrases, key=lambda p: len(p.split()), reverse=True)
+    for phrase in sorted_phrases:
+        p_clean = phrase.strip().lower()
+        if not p_clean:
+            continue
+        words_pattern = r"[,\s]+".join(re.escape(w) for w in p_clean.split())
+        pattern = rf"^(?:(?:oh|um|ah)\s+)?{words_pattern}\b[,\s]*(.*)$"
+        m = re.match(pattern, raw, flags=re.IGNORECASE)
+        if m:
+            trailing = m.group(1).strip()
+            trailing = re.sub(r"^[^\w]+", "", trailing).strip()
+            return True, p_clean, trailing
+
+    return False, "", ""
 
 
 class WakeWordDetector(abc.ABC):
@@ -50,7 +92,7 @@ class FallbackWakeWordDetector(WakeWordDetector):
         self,
         wake_word: str = "Denver",
         threshold: float = 0.5,
-        cooldown_seconds: float = 1.0,
+        cooldown_seconds: float = 1.5,
     ) -> None:
         self.wake_word = wake_word
         self.threshold = threshold
@@ -105,11 +147,19 @@ class FallbackWakeWordDetector(WakeWordDetector):
             self._accumulated_energy += chunk.energy
             if self._frame_count >= 3:  # 150ms of sustained acoustic energy
                 self._last_trigger_time = now
+                confidence = min(1.0, self._accumulated_energy / 3.0)
+                logger.info(
+                    "FallbackWakeWordDetector energy gate fired: chunk_energy=%.4f, avg_energy=%.4f, score=%.4f, threshold=%.4f",
+                    chunk.energy,
+                    self._accumulated_energy / 3.0,
+                    confidence,
+                    self.threshold,
+                )
                 self.reset()
                 return WakeWordResult(
                     detected=True,
                     wake_word=self.wake_word,
-                    confidence=min(1.0, self._accumulated_energy / 3.0),
+                    confidence=confidence,
                     audio_offset_ms=chunk.duration_ms,
                     detector_type=self.detector_type,
                 )

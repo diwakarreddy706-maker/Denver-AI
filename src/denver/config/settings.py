@@ -46,6 +46,16 @@ def _parse_tuple(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
     return parsed if parsed else default
 
 
+def _parse_tuple_preserve_case(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, (list, tuple)):
+        return tuple(str(x).strip() for x in value if str(x).strip())
+    parts = str(value).split(",")
+    parsed = tuple(p.strip() for p in parts if p.strip())
+    return parsed if parsed else default
+
+
 @dataclass(frozen=True)
 class DenverSettings:
     """Central configuration for Denver AI Assistant."""
@@ -145,8 +155,24 @@ class DenverSettings:
     vad_max_utterance_seconds: float = 15.0
     wake_word: str = "Denver"
     wake_word_enabled: bool = True
-    wake_word_cooldown_seconds: float = 1.0
+    wake_word_cooldown_seconds: float = 1.5
     wake_word_threshold: float = 0.5
+    wake_word_accepted_phrases: tuple[str, ...] = (
+        "denver",
+        "hey denver",
+        "denvar",
+        "danver",
+        "denber",
+        "hay denver",
+    )
+    wake_reply_enabled: bool = True
+    wake_replies: tuple[str, ...] = (
+        "Yes?",
+        "I'm listening.",
+        "Go ahead.",
+        "At your service.",
+    )
+    wake_silence_timeout_seconds: float = 6.0
     push_to_talk_enabled: bool = True
     push_to_talk_hotkey: str = "ctrl+space"
     stt_enabled: bool = True
@@ -299,8 +325,18 @@ class DenverSettings:
             vad_max_utterance_seconds=_parse_float(source.get("DENVER_VAD_MAX_UTTERANCE_SECONDS"), 15.0),
             wake_word=source.get("DENVER_WAKE_WORD", "Denver"),
             wake_word_enabled=_parse_bool(source.get("DENVER_WAKE_WORD_ENABLED"), True),
-            wake_word_cooldown_seconds=_parse_float(source.get("DENVER_WAKE_WORD_COOLDOWN_SECONDS"), 1.0),
+            wake_word_cooldown_seconds=_parse_float(source.get("DENVER_WAKE_WORD_COOLDOWN_SECONDS"), 1.5),
             wake_word_threshold=_parse_float(source.get("DENVER_WAKE_WORD_THRESHOLD"), 0.5),
+            wake_word_accepted_phrases=_parse_tuple(
+                source.get("DENVER_WAKE_WORD_ACCEPTED_PHRASES"),
+                ("denver", "hey denver", "denvar", "danver", "denber", "hay denver"),
+            ),
+            wake_reply_enabled=_parse_bool(source.get("DENVER_WAKE_REPLY_ENABLED"), True),
+            wake_replies=_parse_tuple_preserve_case(
+                source.get("DENVER_WAKE_REPLIES"),
+                ("Yes?", "I'm listening.", "Go ahead.", "At your service."),
+            ),
+            wake_silence_timeout_seconds=_parse_float(source.get("DENVER_WAKE_SILENCE_TIMEOUT_SECONDS"), 6.0),
             push_to_talk_enabled=_parse_bool(source.get("DENVER_PUSH_TO_TALK_ENABLED"), True),
             push_to_talk_hotkey=source.get("DENVER_PUSH_TO_TALK_HOTKEY", "ctrl+space"),
             stt_enabled=_parse_bool(source.get("DENVER_STT_ENABLED"), True),

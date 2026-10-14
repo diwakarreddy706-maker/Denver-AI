@@ -20,7 +20,13 @@ class SpeechToTextProvider(abc.ABC):
     """Abstract provider contract for speech-to-text recognition."""
 
     @abc.abstractmethod
-    async def transcribe(self, audio_bytes: bytes, audio_format: AudioFormat | None = None) -> Transcript:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        audio_format: AudioFormat | None = None,
+        prompt: str | None = None,
+        response_format: str = "json",
+    ) -> Transcript:
         """Convert raw PCM audio bytes to recognized text transcript."""
 
     @property
@@ -89,21 +95,35 @@ class WhisperSTTProvider(SpeechToTextProvider):
             self._is_loaded = False
             return False
 
-    async def transcribe(self, audio_bytes: bytes, audio_format: AudioFormat | None = None) -> Transcript:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        audio_format: AudioFormat | None = None,
+        prompt: str | None = None,
+        response_format: str = "json",
+    ) -> Transcript:
         if not self._is_loaded or not self._model:
             return Transcript(text="", is_final=True, confidence=0.0, provider=self.name)
 
         start = time.perf_counter()
         fmt = audio_format or AudioFormat()
 
-        def _sync_transcribe() -> str:
+        def _sync_transcribe() -> tuple[str, float, float]:
             import io
             import numpy as np
             samples = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            segments, _ = self._model.transcribe(samples, language=self.language, beam_size=5)
-            return " ".join(s.text.strip() for s in segments)
+            kwargs: dict[str, Any] = {"language": self.language, "beam_size": 5}
+            prompt_text = GroqWhisperSTTProvider.DEFAULT_DOMAIN_PROMPT if prompt is None else prompt
+            if prompt_text:
+                kwargs["initial_prompt"] = prompt_text
+            segments, _ = self._model.transcribe(samples, **kwargs)
+            seg_list = list(segments)
+            text = " ".join(s.text.strip() for s in seg_list)
+            no_speech = max((getattr(s, "no_speech_prob", 0.0) for s in seg_list), default=0.0)
+            logprob = sum(getattr(s, "avg_logprob", 0.0) for s in seg_list) / len(seg_list) if seg_list else 0.0
+            return text, no_speech, logprob
 
-        text = await asyncio.to_thread(_sync_transcribe)
+        text, no_speech_prob, avg_logprob = await asyncio.to_thread(_sync_transcribe)
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
         return Transcript(
             text=text,
@@ -112,11 +132,17 @@ class WhisperSTTProvider(SpeechToTextProvider):
             language=self.language,
             latency_ms=elapsed_ms,
             provider=self.name,
+            no_speech_prob=no_speech_prob,
+            avg_logprob=avg_logprob,
         )
 
 
 class GroqWhisperSTTProvider(SpeechToTextProvider):
     """Cloud-accelerated Whisper STT using Groq API with Denver Vault authentication."""
+
+    DEFAULT_DOMAIN_PROMPT: str = (
+        "Denver AI assistant. Commands: mailbox, email, check mail, inbox, read recent emails, summarize mail, WhatsApp, volume, windows, apps."
+    )
 
     def __init__(
         self,
@@ -138,7 +164,13 @@ class GroqWhisperSTTProvider(SpeechToTextProvider):
     def is_available(self) -> bool:
         return bool(self.vault.get_secret("GROQ_API_KEY"))
 
-    async def transcribe(self, audio_bytes: bytes, audio_format: AudioFormat | None = None) -> Transcript:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        audio_format: AudioFormat | None = None,
+        prompt: str | None = None,
+        response_format: str = "json",
+    ) -> Transcript:
         api_key = self.vault.get_secret("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("GROQ_API_KEY is not configured in Denver Vault.")
@@ -171,11 +203,23 @@ class GroqWhisperSTTProvider(SpeechToTextProvider):
         body.append(b'Content-Disposition: form-data; name="language"\r\n\r\n')
         body.append(self.language.encode("utf-8") + b"\r\n")
 
+        # Response format (json or verbose_json)
+        if response_format:
+            body.append(f"--{boundary}\r\n".encode("utf-8"))
+            body.append(b'Content-Disposition: form-data; name="response_format"\r\n\r\n')
+            body.append(response_format.encode("utf-8") + b"\r\n")
+
         # Context prompt guiding Whisper on Denver domain vocabulary
-        prompt_text = "Denver AI assistant. Commands: mailbox, email, check mail, inbox, read recent emails, summarize mail, WhatsApp, volume, windows, apps."
-        body.append(f"--{boundary}\r\n".encode("utf-8"))
-        body.append(b'Content-Disposition: form-data; name="prompt"\r\n\r\n')
-        body.append(prompt_text.encode("utf-8") + b"\r\n")
+        # If prompt is explicitly "", omit prompt to avoid hallucinations during wake-word verification
+        prompt_text = (
+            self.DEFAULT_DOMAIN_PROMPT
+            if prompt is None
+            else prompt
+        )
+        if prompt_text:
+            body.append(f"--{boundary}\r\n".encode("utf-8"))
+            body.append(b'Content-Disposition: form-data; name="prompt"\r\n\r\n')
+            body.append(prompt_text.encode("utf-8") + b"\r\n")
 
         body.append(f"--{boundary}\r\n".encode("utf-8"))
         body.append(b'Content-Disposition: form-data; name="file"; filename="speech.wav"\r\n')
@@ -204,7 +248,24 @@ class GroqWhisperSTTProvider(SpeechToTextProvider):
             res_data = await asyncio.to_thread(_do_request)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
             transcript_text = res_data.get("text", "").strip()
-            logger.info("Groq Whisper STT recognized: '%s' in %.2fms", transcript_text, elapsed_ms)
+
+            no_speech_prob = 0.0
+            avg_logprob = 0.0
+            segments = res_data.get("segments", [])
+            if segments:
+                no_speech_prob = max((float(s.get("no_speech_prob", 0.0)) for s in segments), default=0.0)
+                avg_logprob = sum(float(s.get("avg_logprob", 0.0)) for s in segments) / len(segments)
+            elif "no_speech_prob" in res_data:
+                no_speech_prob = float(res_data.get("no_speech_prob", 0.0))
+                avg_logprob = float(res_data.get("avg_logprob", 0.0))
+
+            logger.info(
+                "Groq Whisper STT recognized: '%s' in %.2fms (no_speech_prob=%.2f, avg_logprob=%.2f)",
+                transcript_text,
+                elapsed_ms,
+                no_speech_prob,
+                avg_logprob,
+            )
             return Transcript(
                 text=transcript_text,
                 is_final=True,
@@ -212,6 +273,8 @@ class GroqWhisperSTTProvider(SpeechToTextProvider):
                 language=self.language,
                 latency_ms=elapsed_ms,
                 provider=self.name,
+                no_speech_prob=no_speech_prob,
+                avg_logprob=avg_logprob,
             )
         except Exception as exc:
             logger.error("Groq Whisper transcription failed: %s", exc)

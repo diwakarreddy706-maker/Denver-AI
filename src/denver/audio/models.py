@@ -124,6 +124,8 @@ class Transcript:
     language: str = "en"
     latency_ms: float = 0.0
     provider: str = "whisper"
+    no_speech_prob: float = 0.0
+    avg_logprob: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,6 +135,8 @@ class Transcript:
             "language": self.language,
             "latency_ms": self.latency_ms,
             "provider": self.provider,
+            "no_speech_prob": self.no_speech_prob,
+            "avg_logprob": self.avg_logprob,
         }
 
 

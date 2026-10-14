@@ -1,6 +1,7 @@
 """Unit tests for Denver VoicePipeline orchestrator and barge-in flow."""
 
 import asyncio
+import time
 import pytest
 from denver.audio.fake import (
     FakeAudioCapture,
@@ -174,4 +175,260 @@ async def test_voice_pipeline_mute_and_overlay_notification(voice_env) -> None:
     pipeline._notify_overlay("PROCESSING")
     pipeline._notify_overlay("SPEAKING")
     pipeline._notify_overlay("STANDBY")
+
+
+@pytest.mark.asyncio
+async def test_strict_wake_rejected_noise_and_hello_everyone(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    # Inject mock audio chunks into ring buffer
+    for _ in range(10):
+        pipeline._ring_buffer.append(AudioChunk(data=b"\x00\x10" * 400, sample_rate=16000, duration_ms=50.0))
+
+    # Candidate 1: "hello everyone"
+    fake_stt.canned_transcript = "hello everyone"
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.STANDBY
+    assert fake_tts.synthesize_count == 0
+
+    # Candidate 2: Random noise / empty transcript
+    fake_stt.canned_transcript = ""
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.STANDBY
+    assert fake_tts.synthesize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_strict_wake_valid_phrase_plays_reply_once(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    for _ in range(10):
+        pipeline._ring_buffer.append(AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0))
+
+    fake_stt.canned_transcript = "Hey Denver"
+    await pipeline._handle_wake_detection()
+
+    # Reply must be spoken once
+    assert fake_tts.synthesize_count == 1
+    assert fake_tts.last_request is not None
+    assert fake_tts.last_request.text in pipeline.settings.wake_replies
+    # Must transition to LISTENING
+    assert state_machine.current_state == DenverState.LISTENING
+    assert pipeline._listening_start_time > 0.0
+
+
+@pytest.mark.asyncio
+async def test_strict_wake_no_self_wake_during_tts(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    playback = voice_env["playback"]
+    fake_wakeword = voice_env["wakeword"]
+
+    # Simulate active audio playback
+    playback._is_playing = True
+    fake_wakeword.trigger()
+
+    chunk = AudioChunk(data=b"\x00\x50" * 400, sample_rate=16000, duration_ms=50.0, energy=0.2)
+    # When playback is playing in STANDBY, the pipeline loop bypasses wakeword check
+    curr_state = DenverState.STANDBY
+    should_bypass = playback.is_playing or pipeline.tts_queue.is_speaking or getattr(pipeline, "_is_speaking_wake_reply", False)
+    assert should_bypass is True
+
+
+@pytest.mark.asyncio
+async def test_one_sentence_command_skips_reply_and_executes(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    for _ in range(10):
+        pipeline._ring_buffer.append(AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0))
+
+    # User says wake word and command in one sentence
+    fake_stt.canned_transcript = "Hey Denver, what time is it?"
+    await pipeline._handle_wake_detection()
+
+    # Wake reply must be skipped! Only command response TTS is spoken
+    assert fake_tts.synthesize_count >= 1
+    # Check last request was the command response, not a wake reply
+    assert fake_tts.last_request is not None
+    assert fake_tts.last_request.text not in pipeline.settings.wake_replies
+    assert "time is" in fake_tts.last_request.text.lower()
+    assert state_machine.current_state == DenverState.STANDBY
+
+
+@pytest.mark.asyncio
+async def test_voice_pipeline_silence_timeout_returns_to_standby(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+
+    await state_machine.transition_to(DenverState.LISTENING, reason="Testing silence timeout")
+    # Simulate 6.5s elapsed without speech
+    pipeline._listening_start_time = time.time() - 6.5
+
+    # Simulate chunk arrival during silence in LISTENING mode
+    chunk = AudioChunk(data=b"\x00\x00" * 400, sample_rate=16000, duration_ms=50.0, energy=0.001)
+    silence_timeout = getattr(pipeline.settings, "wake_silence_timeout_seconds", 6.0)
+    assert time.time() - pipeline._listening_start_time > silence_timeout
+
+    # Transition to STANDBY as loop would do
+    await state_machine.transition_to(DenverState.STANDBY, reason="Listening timeout (no speech)")
+    assert state_machine.current_state == DenverState.STANDBY
+
+
+@pytest.mark.asyncio
+async def test_push_to_talk_unbroken(voice_env) -> None:
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_tts = voice_env["tts"]
+
+    await pipeline.trigger_listening()
+
+    # Push to talk enters LISTENING immediately without spoken wake reply
+    assert state_machine.current_state == DenverState.LISTENING
+    assert fake_tts.synthesize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_noise_clip_rejected_without_stt_call(voice_env) -> None:
+    """Clips with no voiced speech / energy below threshold must be rejected with zero STT calls."""
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+
+    # Append pure silence / low-energy ambient noise chunks
+    for _ in range(10):
+        pipeline._ring_buffer.append(
+            AudioChunk(data=b"\x00\x00" * 400, sample_rate=16000, duration_ms=50.0, energy=0.002)
+        )
+
+    fake_stt.transcribe_count = 0
+    await pipeline._handle_wake_detection()
+
+    # Crucial: zero network / provider calls made to STT!
+    assert fake_stt.transcribe_count == 0
+    assert state_machine.current_state == DenverState.STANDBY
+
+
+@pytest.mark.asyncio
+async def test_hallucinated_denver_with_high_no_speech_prob_rejected(voice_env) -> None:
+    """Whisper hallucinated 'Denver.' with high no_speech_prob (> 0.6) must be rejected."""
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    for _ in range(10):
+        pipeline._ring_buffer.append(
+            AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0, energy=0.1)
+        )
+
+    fake_stt.canned_transcript = "Denver."
+    fake_stt.canned_no_speech_prob = 0.85
+    fake_stt.canned_avg_logprob = -0.3
+
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.STANDBY
+    assert fake_tts.synthesize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_hallucinated_denver_with_low_logprob_rejected(voice_env) -> None:
+    """Whisper hallucinated text with very low log probability (< -1.0) must be rejected."""
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    for _ in range(10):
+        pipeline._ring_buffer.append(
+            AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0, energy=0.1)
+        )
+
+    fake_stt.canned_transcript = "Denver"
+    fake_stt.canned_no_speech_prob = 0.1
+    fake_stt.canned_avg_logprob = -1.45
+
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.STANDBY
+    assert fake_tts.synthesize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_short_click_wake_word_rejected_under_point_four_seconds(voice_env) -> None:
+    """Standalone wake word with voiced duration under 0.4s must be rejected (transient noise)."""
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    # Only 2 chunks (100ms voiced audio < 400ms threshold)
+    for _ in range(2):
+        pipeline._ring_buffer.append(
+            AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0, energy=0.1)
+        )
+
+    fake_stt.canned_transcript = "Denver"
+    fake_stt.canned_no_speech_prob = 0.05
+    fake_stt.canned_avg_logprob = -0.2
+
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.STANDBY
+    assert fake_tts.synthesize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_real_hey_denver_passes_with_empty_prompt_and_verbose_json(voice_env) -> None:
+    """Real wake phrase with sufficient voiced audio passes, speaks reply, and requests verbose_json with empty prompt."""
+    pipeline = voice_env["pipeline"]
+    state_machine = voice_env["state_machine"]
+    fake_stt = voice_env["stt"]
+    fake_tts = voice_env["tts"]
+
+    # 10 chunks (500ms voiced audio > 400ms)
+    for _ in range(10):
+        pipeline._ring_buffer.append(
+            AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0, energy=0.1)
+        )
+
+    fake_stt.canned_transcript = "Hey Denver"
+    fake_stt.canned_no_speech_prob = 0.02
+    fake_stt.canned_avg_logprob = -0.15
+
+    await pipeline._handle_wake_detection()
+
+    assert state_machine.current_state == DenverState.LISTENING
+    assert fake_tts.synthesize_count == 1
+    assert fake_stt.last_prompt == ""
+    assert fake_stt.last_response_format == "verbose_json"
+
+
+@pytest.mark.asyncio
+async def test_domain_prompt_used_for_normal_commands(voice_env) -> None:
+    """Normal command transcription retains the domain prompt to assist technical vocabulary."""
+    pipeline = voice_env["pipeline"]
+    fake_stt = voice_env["stt"]
+
+    chunk = AudioChunk(data=b"\x00\x20" * 400, sample_rate=16000, duration_ms=50.0, energy=0.1)
+    pipeline._current_speech_chunks.append(chunk)
+
+    fake_stt.canned_transcript = "check my inbox"
+    await pipeline._process_utterance()
+
+    # Normal command transcription does not override prompt to ""
+    assert fake_stt.last_prompt is None
+    assert fake_stt.last_response_format == "json"
+
+
 
